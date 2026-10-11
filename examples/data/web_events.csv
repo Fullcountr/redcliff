@@ -1,0 +1,5 @@
+event_id,user_id,event_time,event_name
+w1,101,2026-09-01 09:15:00,page_view
+w2,102,2026-09-01 10:02:00,signup
+w3,101,2026-09-02 11:30:00,page_view
+w4,103,2026-09-02 14:45:00,purchase

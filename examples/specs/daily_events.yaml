@@ -1,0 +1,53 @@
+version: 0
+name: daily_events
+description: Combine web and app events and count them per day and channel.
+nodes:
+  - id: web_events
+    type: source
+    params:
+      format: csv
+      path: ../data/web_events.csv
+      columns: {event_id: text, user_id: int, event_time: timestamp, event_name: text}
+
+  - id: app_events
+    type: source
+    params:
+      format: csv
+      path: ../data/app_events.csv
+      columns: {event_id: text, user_id: int, event_time: timestamp, event_name: text}
+
+  - id: web_tagged
+    type: derive
+    inputs: [web_events]
+    params:
+      columns:
+        channel: "'web'"
+        event_day: CAST(event_time AS DATE)
+
+  - id: app_tagged
+    type: derive
+    inputs: [app_events]
+    params:
+      columns:
+        channel: "'app'"
+        event_day: CAST(event_time AS DATE)
+
+  - id: all_events
+    type: union
+    inputs: [web_tagged, app_tagged]
+
+  - id: daily_counts
+    type: aggregate
+    inputs: [all_events]
+    params:
+      group_by: [event_day, channel]
+      measures:
+        events: COUNT(*)
+        users: COUNT(DISTINCT user_id)
+
+  - id: out
+    type: target
+    inputs: [daily_counts]
+    params:
+      format: parquet
+      path: out/daily_counts.parquet

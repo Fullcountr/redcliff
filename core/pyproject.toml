@@ -13,7 +13,9 @@ requires-python = ">=3.11"
 dependencies = ["sqlglot>=30"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "duckdb>=1.1"]
+# PyYAML is optional: JSON specs need nothing extra, and Pyodide ships PyYAML.
+yaml = ["pyyaml>=6"]
+dev = ["pytest>=8", "duckdb>=1.1", "pyyaml>=6", "jsonschema>=4"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/redcliff"]

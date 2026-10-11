@@ -1,0 +1,4 @@
+event_id,user_id,event_time,event_name
+a1,104,2026-09-01 08:00:00,app_open
+a2,101,2026-09-01 19:20:00,purchase
+a3,105,2026-09-02 07:55:00,app_open

@@ -1,0 +1,37 @@
+version: 0
+name: customer_cleanup
+description: Normalize customer contact fields and keep only reachable customers.
+nodes:
+  - id: customers
+    type: source
+    params:
+      format: csv
+      path: ../data/customers.csv
+      columns: {id: int, first_name: text, last_name: text, email: text, region: text, signup_date: date}
+
+  - id: cleaned
+    type: derive
+    inputs: [customers]
+    params:
+      columns:
+        email: LOWER(TRIM(email))
+        full_name: first_name || ' ' || last_name
+
+  - id: reachable
+    type: filter
+    inputs: [cleaned]
+    params:
+      condition: email IS NOT NULL AND email <> ''
+
+  - id: contact_list
+    type: select
+    inputs: [reachable]
+    params:
+      columns: [id, full_name, email, region]
+
+  - id: out
+    type: target
+    inputs: [contact_list]
+    params:
+      format: csv
+      path: out/contact_list.csv

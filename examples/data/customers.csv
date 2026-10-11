@@ -1,0 +1,6 @@
+id,first_name,last_name,email,region,signup_date
+101,Ana,Silva,  Ana.Silva@Example.com ,South,2025-01-15
+102,Ben,Okafor,ben.okafor@example.com,North,2025-03-02
+103,Chen,Wei,CHEN.WEI@EXAMPLE.COM,South,2025-06-20
+104,Dana,Kim,,East,2026-02-11
+105,Eli,Novak,eli.novak@example.com,North,2026-07-30
