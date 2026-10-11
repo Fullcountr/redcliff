@@ -214,8 +214,11 @@ def build_graph(pipeline: Pipeline) -> ColumnGraph:
                 if _name_check(node, c, inp, cols, issues):
                     edge(Ref(inp, c), Ref(nid, c), DIRECT, "IDENTITY", True)
                     graph.dataset_edges.append(DatasetEdge(Ref(inp, c), nid, "GROUP_BY"))
-            for c, sql in p["measures"].items():
+            for c, sql in (p.get("measures") or {}).items():
                 expr_edges(node, sql, Ref(nid, c))
+
+        elif t == "sql":
+            _sql_node_edges(graph, node, issues)
 
         elif t == "union":
             first = cols[node.inputs[0]]
@@ -228,6 +231,51 @@ def build_graph(pipeline: Pipeline) -> ColumnGraph:
                     if pos < len(cols[inp]):
                         edge(Ref(inp, cols[inp][pos]), Ref(nid, c), DIRECT, "IDENTITY", False)
     return graph
+
+
+def _sql_node_edges(graph: ColumnGraph, node: Node, issues: list[Issue]) -> None:
+    """Best-effort lineage for a raw SQL step: its SELECT list, WHERE, JOIN ON and GROUP BY.
+
+    Columns are resolved against the node's inputs, which the query names by node id.
+    """
+    cols = graph.columns
+    if node.id not in cols:
+        issues.append(Issue(node.id, "lineage can't see through this SQL step (it selects *)"))
+        return
+    tree = sqlglot.parse_one(node.params["query"])
+    select = tree if isinstance(tree, exp.Select) else tree.find(exp.Select)
+    if select is None:
+        return
+    aliases = {}
+    for table in select.find_all(exp.Table):
+        if table.name in node.inputs:
+            aliases[table.alias_or_name] = table.name
+
+    def refs(expression: exp.Expression) -> list[tuple[Ref, ColumnUse]]:
+        out = []
+        for use in analyze_expression(expression.sql()):
+            qualifier = aliases.get(use.qualifier, use.qualifier) if use.qualifier else None
+            fixed = ColumnUse(use.column, qualifier, use.type, use.subtype)
+            out += [(r, fixed) for r in _resolve(fixed, node, cols, issues)]
+        return out
+
+    projections = select.expressions
+    if len(projections) == 1 and isinstance(projections[0], exp.Star):
+        for c in cols[node.id]:
+            graph.edges.append(Edge(Ref(node.inputs[0], c), Ref(node.id, c), DIRECT, "IDENTITY", False))
+    else:
+        for name, projection in zip(cols[node.id], projections):
+            for src, use in refs(projection.unalias()):
+                graph.edges.append(Edge(src, Ref(node.id, name), use.type, use.subtype, True))
+    for key, subtype in (("where", "FILTER"), ("having", "FILTER"), ("group", "GROUP_BY")):
+        clause = select.args.get(key)
+        if clause is not None:
+            for src, _ in refs(clause.this if key != "group" else exp.Tuple(expressions=clause.expressions)):
+                graph.dataset_edges.append(DatasetEdge(src, node.id, subtype))
+    for join in select.args.get("joins") or []:
+        if join.args.get("on") is not None:
+            for src, _ in refs(join.args["on"]):
+                graph.dataset_edges.append(DatasetEdge(src, node.id, "JOIN"))
 
 
 def column_issues(pipeline: Pipeline) -> list[Issue]:

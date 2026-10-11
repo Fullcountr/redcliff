@@ -150,9 +150,12 @@ def _node_body(node: Node, cols: dict[str, Columns], dialect: str) -> str:
 
     if t == "aggregate":
         group_by = [_ident(c) for c in p.get("group_by", [])]
-        measures = [f"{e} AS {_ident(c)}" for c, e in p["measures"].items()]
+        measures = [f"{e} AS {_ident(c)}" for c, e in (p.get("measures") or {}).items()]
         sql = f"SELECT {', '.join(group_by + measures)} FROM {src[0]}"
         return sql + (f" GROUP BY {', '.join(group_by)}" if group_by else "")
+
+    if t == "sql":
+        return p["query"]  # inputs are referenced by node id, which is each CTE's name
 
     if t == "union":
         op = " UNION " if p.get("distinct", False) else " UNION ALL "
@@ -317,13 +320,21 @@ def compile_pyspark(pipeline: Pipeline, base_dir=None) -> str:
                 stmt += f".select({', '.join(repr(c) for c in picks)})"
             lines.append(stmt)
         elif t == "aggregate":
-            aggs = ", ".join(f"{ex(e)}.alias({c!r})" for c, e in p["measures"].items())
+            aggs = ", ".join(f"{ex(e)}.alias({c!r})" for c, e in (p.get("measures") or {}).items())
             group_by = p.get("group_by", [])
-            if group_by:
+            if group_by and not aggs:
+                keys = ", ".join(repr(c) for c in group_by)
+                lines.append(f"{var} = {ins[0]}.select({keys}).distinct()")
+            elif group_by:
                 keys = ", ".join(repr(c) for c in group_by)
                 lines.append(f"{var} = {ins[0]}.groupBy({keys}).agg({aggs})")
             else:
                 lines.append(f"{var} = {ins[0]}.agg({aggs})")
+        elif t == "sql":
+            for name, df in zip(node.inputs, ins):
+                lines.append(f"{df}.createOrReplaceTempView({name!r})")
+            query = _transpile(p["query"], "spark")
+            lines.append(f"{var} = spark.sql({query!r})")
         elif t == "union":
             chain = ins[0] + "".join(f".union({i})" for i in ins[1:])
             if p.get("distinct", False):

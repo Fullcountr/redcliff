@@ -16,12 +16,13 @@ from pathlib import Path
 from typing import Any
 
 import sqlglot
+from sqlglot import exp
 from sqlglot.errors import ParseError
 
 SPEC_VERSION = 0
 ID_PATTERN = re.compile(r"^[a-z_][a-z0-9_]*$")
 
-NODE_TYPES = ("source", "filter", "select", "derive", "join", "aggregate", "union", "target")
+NODE_TYPES = ("source", "filter", "select", "derive", "join", "aggregate", "union", "sql", "target")
 FORMATS = ("csv", "parquet", "table")
 JOIN_TYPES = ("inner", "left", "right", "full")
 WRITE_MODES = ("overwrite", "append")
@@ -35,6 +36,7 @@ INPUT_COUNTS: dict[str, tuple[int, int | None]] = {
     "join": (2, 2),
     "aggregate": (1, 1),
     "union": (2, None),
+    "sql": (0, None),
     "target": (1, 1),
 }
 
@@ -198,6 +200,26 @@ def _check_io(issues: list[Issue], nid: str, params: dict, writing: bool) -> Non
                         issues.append(Issue(nid, f"column {col!r} needs a type"))
 
 
+def _check_sql_node(issues: list[Issue], node: Node) -> None:
+    """A raw SQL step: one SELECT that may read only its inputs, by node id."""
+    query = node.params.get("query")
+    if not isinstance(query, str) or not query.strip():
+        issues.append(Issue(node.id, "'query' must be a non-empty SELECT"))
+        return
+    try:
+        tree = sqlglot.parse_one(query)
+    except ParseError as e:
+        issues.append(Issue(node.id, f"'query' is not valid SQL: {str(e).splitlines()[0]}"))
+        return
+    if not isinstance(tree, exp.Query):
+        issues.append(Issue(node.id, "'query' must be a SELECT (or a UNION of SELECTs)"))
+        return
+    local = {cte.alias_or_name for cte in tree.find_all(exp.CTE)}
+    for table in tree.find_all(exp.Table):
+        if table.name and table.name not in local and table.name not in node.inputs:
+            issues.append(Issue(node.id, f"'query' reads {table.name!r}, which is not one of its inputs"))
+
+
 def _check_params(issues: list[Issue], node: Node) -> None:
     nid, p = node.id, node.params
     t = node.type
@@ -235,7 +257,11 @@ def _check_params(issues: list[Issue], node: Node) -> None:
         else:
             for c in group_by:
                 _check_name(issues, nid, "group_by column", c)
-        _check_mapping(issues, nid, p, "measures")
+        # Measures may be empty when grouping alone: that is SELECT DISTINCT.
+        if p.get("measures") or not group_by:
+            _check_mapping(issues, nid, p, "measures")
+    elif t == "sql":
+        _check_sql_node(issues, node)
     elif t == "union":
         if not isinstance(p.get("distinct", False), bool):
             issues.append(Issue(nid, "'distinct' must be true or false"))

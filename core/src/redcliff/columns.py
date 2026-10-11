@@ -7,6 +7,9 @@ does not declare its columns, everything downstream of it is ``None`` (unknown).
 
 from __future__ import annotations
 
+import sqlglot
+from sqlglot import exp
+
 from redcliff.spec import Node, Pipeline
 
 Columns = list[str] | None
@@ -23,7 +26,9 @@ def output_columns(node: Node, inputs: list[Columns]) -> Columns:
     if t == "select":
         return list(p["columns"])
     if t == "aggregate":
-        return list(p.get("group_by", [])) + list(p["measures"])
+        return list(p.get("group_by", [])) + list(p.get("measures") or {})
+    if t == "sql":
+        return _sql_columns(p["query"], inputs)
 
     first = inputs[0] if inputs else None
     if t in ("filter", "union"):
@@ -39,6 +44,21 @@ def output_columns(node: Node, inputs: list[Columns]) -> Columns:
             return None
         return list(left) + [c for c in right if c not in left]
     raise ValueError(f"unknown node type {t!r}")
+
+
+def _sql_columns(query: str, inputs: list[Columns]) -> Columns:
+    """Output columns of a raw SQL step, when they can be read off its SELECT list."""
+    tree = sqlglot.parse_one(query)
+    select = tree if isinstance(tree, exp.Select) else tree.find(exp.Select)
+    if select is None:
+        return None
+    projections = select.expressions
+    if len(projections) == 1 and isinstance(projections[0], exp.Star) and len(inputs) == 1:
+        return list(inputs[0]) if inputs[0] is not None else None
+    if any(isinstance(e, exp.Star) or isinstance(e.unalias(), exp.Star) for e in projections):
+        return None
+    names = select.named_selects
+    return names if len(names) == len(projections) and all(names) else None
 
 
 def infer_columns(pipeline: Pipeline) -> dict[str, Columns]:

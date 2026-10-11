@@ -148,7 +148,9 @@ def chain(node: dict) -> dict:
         ({"type": "select", "params": {"columns": ["a", "a"]}}, "duplicate columns"),
         ({"type": "derive", "params": {"columns": {"New Col": "1"}}}, "must match"),
         ({"type": "derive", "params": {"columns": {"c": "(("}}}, "not valid SQL"),
-        ({"type": "aggregate", "params": {"group_by": ["a"]}}, "'measures' must be a non-empty mapping"),
+        ({"type": "aggregate", "params": {}}, "'measures' must be a non-empty mapping"),
+        ({"type": "sql", "params": {"query": "DELETE FROM f"}}, "must be a SELECT"),
+        ({"type": "sql", "params": {"query": "SELECT * FROM other"}}, "reads 'other', which is not one of its inputs"),
         ({"type": "aggregate", "params": {"group_by": "a", "measures": {"n": "COUNT(*)"}}}, "must be a list"),
         ({"type": "union", "params": {}}, "union needs at least 2 input(s)"),
         ({"type": "join", "params": {"condition": "a = b"}}, "join needs exactly 2 input(s)"),
@@ -185,3 +187,13 @@ def test_yaml_boolean_key_is_explained():
     data = copy.deepcopy(BASE)
     data["nodes"][1]["params"] = {True: "x > 1"}  # what YAML makes of a bare `on:`
     assert any("read as true/false" in m for m in messages(data))
+
+
+def test_distinct_is_an_aggregate_without_measures():
+    data = chain({"type": "aggregate", "params": {"group_by": ["region"]}})
+    assert messages(data) == []
+
+
+def test_sql_node_may_use_its_own_ctes():
+    data = chain({"type": "sql", "params": {"query": "WITH x AS (SELECT * FROM f) SELECT * FROM x ORDER BY 1"}})
+    assert messages(data) == []

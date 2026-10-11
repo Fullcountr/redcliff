@@ -35,9 +35,13 @@ nodes:                        # required, at least one
 | `select` | 1 | `columns`: list of names to keep, in order | the listed columns |
 | `derive` | 1 | `columns`: name: SQL expression | input columns plus new ones; same name replaces |
 | `join` | 2 | `condition`, `how` (inner default, left, right, full) | columns of both inputs |
-| `aggregate` | 1 | `group_by`: list of names, `measures`: name: SQL aggregate | group-by columns then measures |
+| `aggregate` | 1 | `group_by`: list of names, `measures`: name: SQL aggregate (optional when grouping, which is `SELECT DISTINCT`) | group-by columns then measures |
 | `union` | 2+ | `distinct` (false default) | columns of the first input, matched by position |
+| `sql` | 0+ | `query`: one SELECT that reads its inputs by node id | the SELECT's columns |
 | `target` | 1 | `format`, `path` or `table`, `mode` (overwrite default, append) | none (writes data) |
+
+The `sql` node is the escape hatch for logic without a node type yet (ORDER BY, LIMIT,
+subqueries in WHERE, QUALIFY). The SQL importer uses it so nothing is ever dropped silently.
 
 Rules the compiler follows:
 

@@ -4,154 +4,438 @@
   "title": "Redcliff pipeline spec",
   "description": "Structural schema for editors. The Python validator adds checks a schema cannot express: SQL that parses, inputs that exist, no cycles.",
   "type": "object",
-  "required": ["name", "nodes"],
+  "required": [
+    "name",
+    "nodes"
+  ],
   "additionalProperties": false,
   "properties": {
-    "version": { "const": 0 },
-    "name": { "type": "string", "minLength": 1 },
-    "description": { "type": "string" },
-    "nodes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/node" } }
+    "version": {
+      "const": 0
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    }
   },
   "$defs": {
-    "id": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
-    "sql": { "type": "string", "minLength": 1 },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z_][a-z0-9_]*$"
+    },
+    "sql": {
+      "type": "string",
+      "minLength": 1
+    },
     "sqlMap": {
       "type": "object",
       "minProperties": 1,
-      "propertyNames": { "$ref": "#/$defs/id" },
-      "additionalProperties": { "$ref": "#/$defs/sql" }
+      "propertyNames": {
+        "$ref": "#/$defs/id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/sql"
+      }
     },
     "io": {
       "type": "object",
-      "required": ["format"],
+      "required": [
+        "format"
+      ],
       "properties": {
-        "format": { "enum": ["csv", "parquet", "table"] },
-        "path": { "type": "string", "minLength": 1 },
-        "table": { "type": "string", "minLength": 1 }
+        "format": {
+          "enum": [
+            "csv",
+            "parquet",
+            "table"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "table": {
+          "type": "string",
+          "minLength": 1
+        }
       },
-      "if": { "properties": { "format": { "const": "table" } } },
-      "then": { "required": ["table"] },
-      "else": { "required": ["path"] }
+      "if": {
+        "properties": {
+          "format": {
+            "const": "table"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "table"
+        ]
+      },
+      "else": {
+        "required": [
+          "path"
+        ]
+      }
     },
     "node": {
       "type": "object",
-      "required": ["id", "type"],
+      "required": [
+        "id",
+        "type"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "type": { "enum": ["source", "filter", "select", "derive", "join", "aggregate", "union", "target"] },
-        "inputs": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true },
-        "params": { "type": "object" }
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "source",
+            "filter",
+            "select",
+            "derive",
+            "join",
+            "aggregate",
+            "union",
+            "sql",
+            "target"
+          ]
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "uniqueItems": true
+        },
+        "params": {
+          "type": "object"
+        }
       },
       "allOf": [
         {
-          "if": { "properties": { "type": { "const": "source" } } },
+          "if": {
+            "properties": {
+              "type": {
+                "const": "source"
+              }
+            }
+          },
           "then": {
             "properties": {
-              "inputs": { "maxItems": 0 },
+              "inputs": {
+                "maxItems": 0
+              },
               "params": {
-                "allOf": [{ "$ref": "#/$defs/io" }],
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/io"
+                  }
+                ],
                 "properties": {
                   "columns": {
                     "type": "object",
                     "minProperties": 1,
-                    "propertyNames": { "$ref": "#/$defs/id" },
-                    "additionalProperties": { "type": "string", "minLength": 1 }
+                    "propertyNames": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "additionalProperties": {
+                      "type": "string",
+                      "minLength": 1
+                    }
                   }
                 }
               }
             },
-            "required": ["params"]
+            "required": [
+              "params"
+            ]
           }
         },
         {
-          "if": { "properties": { "type": { "const": "target" } } },
-          "then": {
+          "if": {
             "properties": {
-              "inputs": { "minItems": 1, "maxItems": 1 },
-              "params": {
-                "allOf": [{ "$ref": "#/$defs/io" }],
-                "properties": { "mode": { "enum": ["overwrite", "append"] } }
+              "type": {
+                "const": "target"
               }
-            },
-            "required": ["inputs", "params"]
-          }
-        },
-        {
-          "if": { "properties": { "type": { "const": "filter" } } },
+            }
+          },
           "then": {
             "properties": {
-              "inputs": { "minItems": 1, "maxItems": 1 },
-              "params": { "required": ["condition"], "properties": { "condition": { "$ref": "#/$defs/sql" } } }
-            },
-            "required": ["inputs", "params"]
-          }
-        },
-        {
-          "if": { "properties": { "type": { "const": "select" } } },
-          "then": {
-            "properties": {
-              "inputs": { "minItems": 1, "maxItems": 1 },
+              "inputs": {
+                "minItems": 1,
+                "maxItems": 1
+              },
               "params": {
-                "required": ["columns"],
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/io"
+                  }
+                ],
                 "properties": {
-                  "columns": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } }
+                  "mode": {
+                    "enum": [
+                      "overwrite",
+                      "append"
+                    ]
+                  }
                 }
               }
             },
-            "required": ["inputs", "params"]
+            "required": [
+              "inputs",
+              "params"
+            ]
           }
         },
         {
-          "if": { "properties": { "type": { "const": "derive" } } },
+          "if": {
+            "properties": {
+              "type": {
+                "const": "filter"
+              }
+            }
+          },
           "then": {
             "properties": {
-              "inputs": { "minItems": 1, "maxItems": 1 },
-              "params": { "required": ["columns"], "properties": { "columns": { "$ref": "#/$defs/sqlMap" } } }
-            },
-            "required": ["inputs", "params"]
-          }
-        },
-        {
-          "if": { "properties": { "type": { "const": "join" } } },
-          "then": {
-            "properties": {
-              "inputs": { "minItems": 2, "maxItems": 2 },
+              "inputs": {
+                "minItems": 1,
+                "maxItems": 1
+              },
               "params": {
-                "required": ["condition"],
+                "required": [
+                  "condition"
+                ],
                 "properties": {
-                  "how": { "enum": ["inner", "left", "right", "full"] },
-                  "condition": { "$ref": "#/$defs/sql" }
+                  "condition": {
+                    "$ref": "#/$defs/sql"
+                  }
                 }
               }
             },
-            "required": ["inputs", "params"]
+            "required": [
+              "inputs",
+              "params"
+            ]
           }
         },
         {
-          "if": { "properties": { "type": { "const": "aggregate" } } },
+          "if": {
+            "properties": {
+              "type": {
+                "const": "select"
+              }
+            }
+          },
           "then": {
             "properties": {
-              "inputs": { "minItems": 1, "maxItems": 1 },
+              "inputs": {
+                "minItems": 1,
+                "maxItems": 1
+              },
               "params": {
-                "required": ["measures"],
+                "required": [
+                  "columns"
+                ],
                 "properties": {
-                  "group_by": { "type": "array", "items": { "$ref": "#/$defs/id" } },
-                  "measures": { "$ref": "#/$defs/sqlMap" }
+                  "columns": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "$ref": "#/$defs/id"
+                    }
+                  }
                 }
               }
             },
-            "required": ["inputs", "params"]
+            "required": [
+              "inputs",
+              "params"
+            ]
           }
         },
         {
-          "if": { "properties": { "type": { "const": "union" } } },
+          "if": {
+            "properties": {
+              "type": {
+                "const": "derive"
+              }
+            }
+          },
           "then": {
             "properties": {
-              "inputs": { "minItems": 2 },
-              "params": { "properties": { "distinct": { "type": "boolean" } } }
+              "inputs": {
+                "minItems": 1,
+                "maxItems": 1
+              },
+              "params": {
+                "required": [
+                  "columns"
+                ],
+                "properties": {
+                  "columns": {
+                    "$ref": "#/$defs/sqlMap"
+                  }
+                }
+              }
             },
-            "required": ["inputs"]
+            "required": [
+              "inputs",
+              "params"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "join"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "inputs": {
+                "minItems": 2,
+                "maxItems": 2
+              },
+              "params": {
+                "required": [
+                  "condition"
+                ],
+                "properties": {
+                  "how": {
+                    "enum": [
+                      "inner",
+                      "left",
+                      "right",
+                      "full"
+                    ]
+                  },
+                  "condition": {
+                    "$ref": "#/$defs/sql"
+                  }
+                }
+              }
+            },
+            "required": [
+              "inputs",
+              "params"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "aggregate"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "inputs": {
+                "minItems": 1,
+                "maxItems": 1
+              },
+              "params": {
+                "properties": {
+                  "group_by": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/id"
+                    }
+                  },
+                  "measures": {
+                    "$ref": "#/$defs/sqlMap"
+                  }
+                },
+                "anyOf": [
+                  {
+                    "required": [
+                      "measures"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "group_by"
+                    ],
+                    "properties": {
+                      "group_by": {
+                        "minItems": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "required": [
+              "inputs",
+              "params"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "union"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "inputs": {
+                "minItems": 2
+              },
+              "params": {
+                "properties": {
+                  "distinct": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            },
+            "required": [
+              "inputs"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "sql"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "required": [
+                  "query"
+                ],
+                "properties": {
+                  "query": {
+                    "$ref": "#/$defs/sql"
+                  }
+                }
+              }
+            },
+            "required": [
+              "params"
+            ]
           }
         }
       ]
