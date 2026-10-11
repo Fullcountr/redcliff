@@ -1,0 +1,17 @@
+{
+  "orders": {
+    "order_id": "int",
+    "customer_id": "int",
+    "order_date": "date",
+    "status": "text",
+    "amount": "decimal(10,2)"
+  },
+  "customers": {
+    "id": "int",
+    "first_name": "text",
+    "last_name": "text",
+    "email": "text",
+    "region": "text",
+    "signup_date": "date"
+  }
+}

@@ -7,7 +7,8 @@ Paste legacy SQL (and soon, import Informatica PowerCenter mappings), see it as 
 editable graph with column-level lineage, preview it on sample data, and generate
 clean Spark SQL, PySpark or DuckDB SQL that you own.
 
-> Status: early development. Nothing here is ready for production use yet.
+> Status: early development. The engine (spec, compiler, lineage, SQL importer, CLI) works;
+> the visual canvas is next. Not ready for production use yet.
 
 ## Why
 
@@ -26,6 +27,25 @@ Canvas / SQL importer  ->  Pipeline spec (YAML, in Git)  ->  Compiler -> Spark S
 
 The pipeline spec is the single source of truth. The canvas edits it; code and lineage
 are generated from it.
+
+## Try it
+
+```bash
+cd core && pip install -e ".[cli]"
+
+# Turn a legacy Teradata BTEQ job into a pipeline
+redcliff import ../examples/legacy/teradata_revenue.sql --dialect teradata \
+  --schema ../examples/legacy/schema.json -o pipeline.yaml
+
+redcliff validate pipeline.yaml                       # structure and column checks
+redcliff compile  pipeline.yaml --to spark            # or duckdb, pyspark
+redcliff lineage  pipeline.yaml --impact orders.status
+redcliff run      pipeline.yaml --db warehouse.duckdb # run it locally on DuckDB
+```
+
+The schema file maps each table to its columns (see `examples/legacy/schema.json`). It is
+optional, but it makes lineage and join handling exact. `run --db` expects a DuckDB file that
+already holds the source tables.
 
 ## Repository layout
 
