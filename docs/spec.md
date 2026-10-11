@@ -56,5 +56,5 @@ work best when Redcliff knows each source's schema.
 - Every SQL expression parses.
 - It reports every problem at once, not just the first.
 
-Column-level checks (a group-by column that doesn't exist, for example) arrive with the
-lineage engine.
+Column-level checks (an unknown or ambiguous column, a union whose inputs have different
+widths) come from `redcliff.column_issues`, which needs declared source columns.

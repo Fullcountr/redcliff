@@ -34,3 +34,18 @@ samples; full runs happen in the user's own Spark or DuckDB environment with the
 
 Golden tests run the DuckDB output on the sample data. Spark SQL is checked by parsing and
 PySpark by compiling; running them against real Spark is a later CI addition.
+
+## Lineage
+
+| Kind | Subtype | Example |
+| --- | --- | --- |
+| DIRECT | IDENTITY | a column passed through or selected |
+| DIRECT | TRANSFORMATION | `LOWER(TRIM(email))` |
+| DIRECT | AGGREGATION | `SUM(amount)` |
+| INDIRECT (column) | CONDITIONAL, WINDOW | a CASE condition; a window's partition or order |
+| INDIRECT (rows) | FILTER, JOIN, GROUP_BY | decides which rows a node has |
+
+`blast_radius` answers "what if this column changes?": columns whose **values** change,
+nodes whose **rows** change, and nodes that would **break** on a rename (they name the
+column, or a same-named pass-through copy of it). `openlineage_facet` exports a node's
+lineage as an OpenLineage ColumnLineageDatasetFacet 1-2-0.
