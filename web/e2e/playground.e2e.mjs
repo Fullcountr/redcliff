@@ -1,0 +1,176 @@
+// End-to-end test of the playground in a real Chromium.
+//
+//   APP_URL=http://localhost:4173/ CHROMIUM_PATH=/path/to/chrome node playground.e2e.mjs
+//
+// Drives the full loop: engine boot, row counts, lineage hover, blast radius, SQL import,
+// data preview, generated code and share links. Screenshots go to SCREENSHOT_DIR if set.
+import assert from "node:assert/strict";
+import { mkdirSync } from "node:fs";
+import { chromium } from "playwright-core";
+
+const url = process.env.APP_URL || "http://localhost:4173/";
+const shots = process.env.SCREENSHOT_DIR;
+if (shots) mkdirSync(shots, { recursive: true });
+
+const browser = await chromium.launch({
+  executablePath: process.env.CHROMIUM_PATH || undefined,
+  args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+  headless: true,
+});
+const errors = [];
+let failures = 0;
+
+async function step(name, fn) {
+  const started = Date.now();
+  try {
+    await fn();
+    console.log(`  ok   ${name} (${Date.now() - started} ms)`);
+  } catch (e) {
+    failures++;
+    console.log(`  FAIL ${name}\n       ${String(e.message || e).split("\n").slice(0, 4).join("\n       ")}`);
+  }
+}
+
+async function shot(page, name) {
+  if (shots) await page.screenshot({ path: `${shots}/${name}.png` });
+}
+
+const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+const page = await context.newPage();
+page.on("pageerror", (e) => errors.push(String(e)));
+page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+
+const col = (node, column) =>
+  page.locator(`.react-flow__node[data-id="${node}"] button.col`, { hasText: new RegExp(`^${column}$`) });
+const rowsOf = (node) => page.locator(`.react-flow__node[data-id="${node}"] .step-rows`);
+
+console.log(`Redcliff playground e2e against ${url}`);
+
+await step("engine boots in the browser", async () => {
+  await page.goto(url);
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="engine-status"]')?.textContent?.startsWith("Engine ready"),
+    null, { timeout: 120000 });
+});
+
+await step("default example renders with live row counts", async () => {
+  await page.waitForSelector('.react-flow__node[data-id="revenue_by_region"]');
+  assert.equal(await page.locator(".react-flow__node").count(), 6);
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="revenue_by_region"] .step-rows')?.textContent === "2 rows", null, { timeout: 30000 });
+  assert.equal(await rowsOf("orders").textContent(), "8 rows");
+  assert.equal(await rowsOf("shipped").textContent(), "6 rows");
+  await shot(page, "01-default");
+});
+
+await step("hovering a column traces it back to its source", async () => {
+  await col("revenue_by_region", "revenue").hover();
+  await page.waitForSelector('.react-flow__node[data-id="orders"] button.col.is-lit');
+  const lit = await page.locator("button.col.is-lit").allTextContents();
+  assert.ok(lit.includes("amount"), `amount should be lit, got ${lit}`);
+  assert.ok(!lit.includes("region"), "region does not feed revenue");
+  assert.ok(await page.locator('.react-flow__node[data-id="customers"] .step.is-dimmed').count() === 1);
+  await shot(page, "02-trace");
+  await page.mouse.move(5, 5);
+});
+
+await step("clicking a column shows its blast radius", async () => {
+  await col("orders", "status").click();
+  await page.waitForSelector(".impact");
+  const text = await page.locator(".impact").innerText();
+  assert.match(text, /If orders\.status changes/);
+  assert.match(text, /A rename breaks\s+shipped/);
+  assert.ok(await page.locator('.react-flow__node[data-id="revenue_by_region"] .step.rows-change').count() === 1);
+  assert.match(await page.locator('.react-flow__node[data-id="shipped"]').innerText(), /Breaks on rename/);
+  await shot(page, "03-impact");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".impact", { state: "detached" });
+});
+
+await step("selecting a step previews its data", async () => {
+  await page.locator('.react-flow__node[data-id="revenue_by_region"] .step-id').click();
+  await page.getByRole("tab", { name: "Data" }).click();
+  await page.waitForSelector(".data table tbody tr");
+  const rows = await page.locator(".data table tbody tr").allInnerTexts();
+  assert.equal(rows.length, 2);
+  assert.ok(rows.some((r) => r.includes("South") && r.includes("330.50")), rows.join(" | "));
+  await shot(page, "04-data");
+});
+
+await step("code tab generates Spark SQL and PySpark", async () => {
+  await page.getByRole("tab", { name: "Code" }).click();
+  await page.waitForFunction(() => document.querySelector(".code-block")?.textContent?.includes("INSERT OVERWRITE"));
+  await page.getByRole("button", { name: "PySpark" }).click();
+  await page.waitForFunction(() => document.querySelector(".code-block")?.textContent?.includes("spark.read"));
+  await shot(page, "05-code");
+});
+
+await step("editing a step updates the pipeline", async () => {
+  await page.locator('.react-flow__node[data-id="shipped"] .step-id').click();
+  await page.getByRole("tab", { name: "Step" }).click();
+  const box = page.locator("textarea.code-input");
+  await box.fill("condition: amount > 50");
+  await page.getByRole("button", { name: "Apply changes" }).click();
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="shipped"] .step-rows')?.textContent === "5 rows", null, { timeout: 30000 });
+});
+
+await step("a broken step is flagged, not fatal", async () => {
+  const box = page.locator("textarea.code-input");
+  await box.fill("condition: amout > 50");
+  await page.getByRole("button", { name: "Apply changes" }).click();
+  await page.waitForSelector('.react-flow__node[data-id="shipped"] .step.has-issues');
+  assert.match(await page.locator('.react-flow__node[data-id="shipped"] .step-issue').innerText(), /unknown column 'amout'/);
+  await shot(page, "06-issue");
+});
+
+await step("importing a legacy Teradata job builds the pipeline", async () => {
+  await page.getByRole("button", { name: "Import SQL" }).click();
+  await page.waitForSelector("dialog[open]");
+  await page.getByRole("button", { name: "Import", exact: true }).click();
+  await page.waitForSelector("dialog[open]", { state: "detached" });
+  await page.waitForSelector('.react-flow__node[data-id="regional_revenue"]');
+  assert.equal(await page.locator(".react-flow__node").count(), 10);
+  const notes = await page.locator(".notes").innerText();
+  assert.match(notes, /QUALIFY kept as a SQL step/);
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="regional_revenue"] .step-rows')?.textContent === "2 rows", null, { timeout: 30000 });
+  await shot(page, "07-imported");
+});
+
+await step("lineage works on the imported job", async () => {
+  await col("regional_revenue", "revenue").hover();
+  await page.waitForSelector('.react-flow__node[data-id="orders"] button.col.is-lit');
+  assert.deepEqual(await page.locator('.react-flow__node[data-id="orders"] button.col.is-lit').allTextContents(), ["amount"]);
+  await shot(page, "08-imported-trace");
+  await page.mouse.move(5, 5);
+});
+
+await step("a share link restores the pipeline", async () => {
+  await page.getByRole("button", { name: "Share link" }).click();
+  await page.waitForFunction(() => location.hash.startsWith("#p="));
+  const link = page.url();
+  const fresh = await context.newPage();
+  await fresh.goto(link);
+  await fresh.waitForSelector('.react-flow__node[data-id="top_customer_per_region"]', { timeout: 120000 });
+  assert.equal(await fresh.locator(".react-flow__node").count(), 10);
+  await fresh.close();
+});
+
+await step("works on a phone-sized screen and in dark mode", async () => {
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: "dark" });
+  const p = await phone.newPage();
+  await p.goto(url);
+  await p.waitForFunction(() => document.querySelector('.react-flow__node[data-id="revenue_by_region"] .step-rows')?.textContent === "2 rows", null, { timeout: 120000 });
+  await p.waitForTimeout(500);
+  const overflow = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  assert.ok(overflow <= 1, `page scrolls sideways by ${overflow}px`);
+  if (shots) await p.screenshot({ path: `${shots}/09-phone-dark.png`, fullPage: true });
+  await phone.close();
+});
+
+await browser.close();
+const relevant = errors.filter((e) => !/favicon|sourcemap/i.test(e));
+if (relevant.length) {
+  console.log(`\nConsole errors (${relevant.length}):\n  ${relevant.slice(0, 5).join("\n  ")}`);
+  failures++;
+}
+console.log(failures ? `\n${failures} failed` : "\nall passed");
+process.exit(failures ? 1 : 0);

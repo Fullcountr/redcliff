@@ -1,0 +1,11 @@
+{
+  "name": "redcliff-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node playground.e2e.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "^1.56.0"
+  }
+}

@@ -1,0 +1,47 @@
+// Promise-based client for the Pyodide engine worker.
+import type { Analysis, Impact, Spec } from "../model";
+
+type Result<T> = ({ ok: true } & T) | { ok: false; error: string; issues?: string[] };
+
+let worker: Worker | null = null;
+let nextId = 1;
+const pending = new Map<number, (value: unknown) => void>();
+let readyResolve: (ms: number) => void;
+let readyReject: (err: Error) => void;
+export const engineReady = new Promise<number>((resolve, reject) => {
+  readyResolve = resolve;
+  readyReject = reject;
+});
+
+export function startEngine(): void {
+  if (worker) return;
+  worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+  worker.onmessage = (e: MessageEvent) => {
+    const msg = e.data;
+    if (msg.type === "ready") return readyResolve(msg.ms);
+    if (msg.type === "failed") return readyReject(new Error(msg.error));
+    pending.get(msg.id)?.(msg.result);
+    pending.delete(msg.id);
+  };
+}
+
+function call<T>(fn: string, ...args: unknown[]): Promise<Result<T>> {
+  startEngine();
+  const id = nextId++;
+  return new Promise((resolve) => {
+    pending.set(id, resolve as (v: unknown) => void);
+    worker!.postMessage({ id, fn, args });
+  });
+}
+
+const json = (spec: Spec) => JSON.stringify(spec);
+
+export const engine = {
+  analyze: (spec: Spec) => call<Analysis>("analyze", json(spec)),
+  previewQuery: (spec: Spec, node: string) => call<{ sql: string; node: string }>("preview_query", json(spec), node),
+  code: (spec: Spec, target: string, node?: string | null) =>
+    call<{ code: string }>("code", json(spec), target, node ?? null),
+  importSql: (sql: string, dialect: string, schema: Record<string, Record<string, string>>, name: string) =>
+    call<{ spec: Spec; warnings: string[]; outputs: string[] }>("import_sql", sql, dialect, JSON.stringify(schema), name),
+  impact: (spec: Spec, node: string, column: string) => call<Impact>("impact", json(spec), node, column),
+};

@@ -21,13 +21,23 @@ jobs:
 
   web:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: npm ci
-      - run: npm run build
+      - name: Build the app (vendors Pyodide, sqlglot and the engine)
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Browser end-to-end test
+        working-directory: web
+        run: |
+          (cd e2e && npm ci && npx playwright-core install --with-deps chromium)
+          npx vite preview --port 4173 --strictPort &
+          for i in $(seq 1 60); do curl -sf http://localhost:4173/ > /dev/null && break; sleep 1; done
+          APP_URL=http://localhost:4173/ node e2e/playground.e2e.mjs

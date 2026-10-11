@@ -18,3 +18,8 @@ spikes/**/wheels/
 .vscode/
 .idea/
 .DS_Store
+
+# Vendored by web/scripts/build-engine.mjs
+web/public/pyodide/
+web/public/engine/
+web/public/samples/

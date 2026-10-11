@@ -7,8 +7,8 @@ Paste legacy SQL (and soon, import Informatica PowerCenter mappings), see it as 
 editable graph with column-level lineage, preview it on sample data, and generate
 clean Spark SQL, PySpark or DuckDB SQL that you own.
 
-> Status: early development. The engine (spec, compiler, lineage, SQL importer, CLI) works;
-> the visual canvas is next. Not ready for production use yet.
+> Status: early development. The engine, CLI and browser playground work; the PowerCenter
+> importer is next. Not ready for production use yet.
 
 ## Why
 
@@ -28,7 +28,21 @@ Canvas / SQL importer  ->  Pipeline spec (YAML, in Git)  ->  Compiler -> Spark S
 The pipeline spec is the single source of truth. The canvas edits it; code and lineage
 are generated from it.
 
-## Try it
+## Playground
+
+The web app runs the whole engine in your browser: Python (via Pyodide) for the pipeline
+logic and DuckDB-Wasm for previews. Nothing is uploaded.
+
+- Paste legacy SQL (Teradata, Oracle, SQL Server, Snowflake and more) and get an editable pipeline.
+- Hover a column to trace it back to its sources; click it to see its blast radius.
+- Preview every step's rows, edit steps, add your own CSV files.
+- Generate Spark SQL, PySpark or DuckDB SQL, and share a pipeline as a link.
+
+```bash
+cd web && npm install && npm run dev   # needs Python 3 with pip for the engine build step
+```
+
+## Try the CLI
 
 ```bash
 cd core && pip install -e ".[cli]"
