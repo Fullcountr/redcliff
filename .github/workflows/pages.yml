@@ -1,8 +1,15 @@
 name: Deploy playground
 
-# Manual for now: GitHub Pages on a private repo needs a paid plan. Run it after going public.
+# Publishes the playground to GitHub Pages on every push to main.
+# One-time setup: Settings > Pages > Build and deployment > Source: GitHub Actions.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -29,6 +36,7 @@ jobs:
         run: |
           npm ci
           npm run build
+      - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/dist
