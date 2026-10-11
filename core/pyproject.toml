@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "redcliff"
+version = "0.0.1"
+description = "Open-source visual pipelines with lineage built in. Legacy ETL in, clean Spark out."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+# Pure-Python dependencies only: this package must also run in Pyodide.
+dependencies = ["sqlglot>=30"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "duckdb>=1.1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/redcliff"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
