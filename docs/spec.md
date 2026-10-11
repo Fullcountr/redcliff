@@ -39,6 +39,13 @@ nodes:                        # required, at least one
 | `union` | 2+ | `distinct` (false default) | columns of the first input, matched by position |
 | `target` | 1 | `format`, `path` or `table`, `mode` (overwrite default, append) | none (writes data) |
 
+Rules the compiler follows:
+
+- A derive sees only its input's columns, so one derived column can't use another from the
+  same node; chain two derives instead.
+- When both sides of a join share a column name, the left side's column is kept.
+- Without declared source columns, a derive can only add new columns, not replace one.
+
 Declaring `columns` on sources is optional but recommended: lineage and early error checks
 work best when Redcliff knows each source's schema.
 
