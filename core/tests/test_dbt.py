@@ -33,6 +33,8 @@ TABLES = {
     "orders": "order_id INT, customer_id INT, order_date DATE, status VARCHAR, amount DECIMAL(10,2)",
     "customers": "id INT, first_name VARCHAR, last_name VARCHAR, email VARCHAR, region VARCHAR, signup_date DATE",
     "regions": "region VARCHAR, manager VARCHAR, monthly_target DECIMAL(12,2)",
+    "store_sales": "store_id INT, region VARCHAR, q1_sales DECIMAL(12,2), q2_sales DECIMAL(12,2), "
+                   "q3_sales DECIMAL(12,2), q4_sales DECIMAL(12,2)",
 }
 
 
@@ -66,6 +68,7 @@ PIPELINES = {
     "m_customer_revenue": lambda: import_powercenter((PC / "m_customer_revenue.xml").read_text()).pipeline,
     "wf_customer_revenue": lambda: without_hooks(import_powercenter(
         (PC / "wf_customer_revenue.xml").read_text(), params=(PC / "wf_customer_revenue.par").read_text()).pipeline),
+    "wf_store_mart": lambda: import_powercenter((PC / "wf_store_mart.xml").read_text()).pipeline,
 }
 
 

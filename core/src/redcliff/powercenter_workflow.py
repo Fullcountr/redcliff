@@ -6,7 +6,8 @@
 - **Sessions** override transformation attributes (SQL overrides, source filters, lookup
   overrides), set target options (truncate, pre/post SQL) and name a parameter file.
 - **Workflows** give the run order of sessions and hold other tasks (commands, emails,
-  decisions) that belong to an orchestrator, not a pipeline.
+  decisions) that belong to an orchestrator, not a pipeline. **Worklets** are expanded in place:
+  their tasks join the run order where the worklet runs, nested worklets too.
 - **Parameter files** set ``$$PARAMS`` per session, workflow or globally.
 """
 
@@ -118,6 +119,7 @@ class Session:
     attrs: dict[str, dict[str, str]] = field(default_factory=dict)  # instance -> attribute -> value
     param_file: str | None = None
     workflow: str | None = None
+    worklet: str | None = None  # the worklet instance it runs in, for [folder.WF:wf.WT:wt.ST:s]
 
 
 def _session(el: ET.Element, workflow: str | None) -> Session:
@@ -155,6 +157,7 @@ class Workflow:
     tasks: dict[str, Task]
     sessions: dict[str, str]                           # task instance -> session name
     conditions: list[str] = field(default_factory=list)
+    labels: dict[str, str] = field(default_factory=dict)  # task key -> name as written, worklet included
 
 
 def _run_order(names: list[str], links: list[tuple[str, str]]) -> list[str]:
@@ -171,47 +174,86 @@ def _run_order(names: list[str], links: list[tuple[str, str]]) -> list[str]:
     return order
 
 
+_DETAIL_ATTRS = ("email user name", "email subject", "decision name", "decision condition", "event wait file")
+
+
+def _flow(el: ET.Element, wname: str, ctx: dict, sessions: dict[str, Session], key: str = "", label: str = "",
+          worklet: str | None = None, depth: int = 0, labels: dict[str, str] | None = None,
+          ) -> tuple[list[str], dict[str, Task], dict[str, str], list[str]]:
+    """Run order, tasks, sessions and link conditions of a workflow or worklet, worklets expanded.
+
+    Task keys inside a worklet are prefixed with the worklet instance (``WKL_LOAD/S_LOAD``).
+    """
+    for s_el in el.findall("SESSION"):
+        s = _session(s_el, wname)
+        s.worklet = worklet
+        sessions[s.name] = s
+    local_worklets = {(w.get("NAME") or "").upper(): w for w in el.findall("WORKLET")}
+    tasks_el = {(t.get("NAME") or "").upper(): t for t in el.findall("TASK")}
+    names: list[str] = []
+    tasks: dict[str, Task] = {}
+    session_of: dict[str, str] = {}
+    expanded: dict[str, list[str]] = {}
+    conditions: list[str] = []
+    for ti in el.findall("TASKINSTANCE"):
+        name = (ti.get("NAME") or "").upper()
+        task = (ti.get("TASKNAME") or name).upper()
+        ttype = ti.get("TASKTYPE") or "Task"
+        shown = f"{label}{ti.get('NAME') or name}"
+        names.append(name)
+        if labels is not None:
+            labels[key + name] = shown
+        if ttype.lower() == "session":
+            session_of[key + name] = task
+            if task in sessions and sessions[task].workflow is None:
+                sessions[task].workflow = wname
+            if task in sessions and worklet and sessions[task].worklet is None:
+                sessions[task].worklet = worklet
+            continue
+        if ttype.lower() == "worklet":
+            wel = local_worklets.get(task)
+            if wel is None:
+                wel = ctx["worklets"].get(task)
+            if wel is not None and depth < 8:
+                order, inner, inner_sessions, inner_conds = _flow(
+                    wel, wname, ctx, sessions, f"{key}{name}/", f"{shown}/", name, depth + 1, labels)
+                expanded[name] = order
+                tasks.update(inner)
+                session_of.update(inner_sessions)
+                conditions += inner_conds
+                continue
+            tasks[key + name] = Task(shown, ttype, [f"worklet {ti.get('TASKNAME') or name} isn't in the export"], shown)
+            continue
+        found = tasks_el.get(task)
+        if found is None:  # an element without children is falsy, so no `or`
+            found = ctx["tasks"].get(task)
+        detail = []
+        if found is not None:
+            detail = [f"{v.get('NAME')}: {v.get('VALUE')}" for v in found.findall("VALUEPAIR") if v.get("VALUE")]
+            detail += [f"{a.get('NAME')}: {a.get('VALUE')}" for a in found.findall("ATTRIBUTE")
+                       if (a.get("NAME") or "").lower() in _DETAIL_ATTRS and a.get("VALUE")]
+        tasks[key + name] = Task(shown, ttype, detail, shown)
+    links = [((l.get("FROMTASK") or "").upper(), (l.get("TOTASK") or "").upper()) for l in el.findall("WORKFLOWLINK")]
+    conditions = [f"{label}{l.get('FROMTASK')} → {label}{l.get('TOTASK')} if {l.get('CONDITION')}"
+                  for l in el.findall("WORKFLOWLINK") if (l.get("CONDITION") or "").strip()] + conditions
+    order: list[str] = []
+    for n in _run_order(names, links):
+        order += expanded.get(n, [key + n])
+    return order, tasks, session_of, conditions
+
+
 def parse_folder(folder: ET.Element) -> tuple[dict[str, Session], list[Workflow]]:
-    """Sessions (reusable and inside workflows) and workflows of one folder."""
+    """Sessions (reusable and inside workflows) and workflows of one folder, worklets expanded."""
     fname = (folder.get("NAME") or "").upper()
     sessions = {s.name: s for s in (_session(el, None) for el in folder.findall("SESSION"))}
-    reusable_tasks = {(t.get("NAME") or "").upper(): t for t in folder.findall("TASK")}
+    ctx = {"tasks": {(t.get("NAME") or "").upper(): t for t in folder.findall("TASK")},
+           "worklets": {(w.get("NAME") or "").upper(): w for w in folder.findall("WORKLET")}}
     workflows: list[Workflow] = []
     for wf in folder.findall("WORKFLOW"):
         wname = (wf.get("NAME") or "").upper()
-        for el in wf.findall("SESSION"):
-            s = _session(el, wname)
-            sessions[s.name] = s
-        tasks_el = {(t.get("NAME") or "").upper(): t for t in wf.findall("TASK")}
-        names: list[str] = []
-        tasks: dict[str, Task] = {}
-        session_of: dict[str, str] = {}
-        for ti in wf.findall("TASKINSTANCE"):
-            name = (ti.get("NAME") or "").upper()
-            task = (ti.get("TASKNAME") or name).upper()
-            ttype = ti.get("TASKTYPE") or "Task"
-            names.append(name)
-            if ttype.lower() == "session":
-                session_of[name] = task
-                if task in sessions and sessions[task].workflow is None:
-                    sessions[task].workflow = wname
-                continue
-            el = tasks_el.get(task)
-            if el is None:  # an element without children is falsy, so no `or`
-                el = reusable_tasks.get(task)
-            detail = []
-            if el is not None:
-                detail = [f"{v.get('NAME')}: {v.get('VALUE')}" for v in el.findall("VALUEPAIR") if v.get("VALUE")]
-                detail += [f"{a.get('NAME')}: {a.get('VALUE')}" for a in el.findall("ATTRIBUTE")
-                           if (a.get("NAME") or "").lower() in ("email user name", "email subject", "decision name",
-                                                                  "decision condition", "event wait file")
-                           and a.get("VALUE")]
-            tasks[name] = Task(name, ttype, detail, ti.get("NAME") or name)
-        links = [((l.get("FROMTASK") or "").upper(), (l.get("TOTASK") or "").upper()) for l in wf.findall("WORKFLOWLINK")]
-        conditions = [f"{l.get('FROMTASK')} → {l.get('TOTASK')} if {l.get('CONDITION')}"
-                      for l in wf.findall("WORKFLOWLINK") if (l.get("CONDITION") or "").strip()]
-        workflows.append(Workflow(wname, wf.get("NAME") or wname, fname, _run_order(names, links), tasks, session_of,
-                                  conditions))
+        labels: dict[str, str] = {}
+        order, tasks, session_of, conditions = _flow(wf, wname, ctx, sessions, labels=labels)
+        workflows.append(Workflow(wname, wf.get("NAME") or wname, fname, order, tasks, session_of, conditions, labels))
     return sessions, workflows
 
 
@@ -236,9 +278,10 @@ def parse_param_file(text: str) -> list[tuple[str, dict[str, str]]]:
 
 
 def resolve_params(sections: list[tuple[str, dict[str, str]]], folder: str, workflow: str | None,
-                   session: str | None) -> dict[str, str]:
+                   session: str | None, worklet: str | None = None) -> dict[str, str]:
     """Parameter values for one session; more specific sections win, as in PowerCenter."""
     folder, workflow, session = folder.upper(), (workflow or "").upper(), (session or "").upper()
+    worklet = (worklet or "").upper()
 
     def rank(header: str) -> int:
         if header == "GLOBAL":
@@ -249,8 +292,11 @@ def resolve_params(sections: list[tuple[str, dict[str, str]]], folder: str, work
         rest = [p for p in parts[1:]] if len(parts) > 1 else parts
         wf = next((p[3:] for p in rest if p.startswith("WF:")), None)
         st = next((p[3:] for p in rest if p.startswith("ST:")), None)
+        wt = [p[3:] for p in rest if p.startswith("WT:")]
+        if wt and (not worklet or wt[-1] != worklet):
+            return 0
         if wf and st:
-            return 4 if wf == workflow and st == session else 0
+            return (5 if wt else 4) if wf == workflow and st == session else 0
         if wf:
             return 2 if wf == workflow else 0
         name = rest[-1] if rest else ""

@@ -20,6 +20,8 @@ Union                  ``select`` per input group + ``union``
 Sorter                 nothing (order doesn't matter), or ``aggregate`` if distinct
 Update Strategy        nothing, or a ``filter`` that drops DD_REJECT rows
 Sequence Generator     a ``ROW_NUMBER()`` column, flagged for review
+Rank                   ``derive`` with a ``RANK()`` window + ``filter`` on it
+Normalizer             ``derive`` + ``select`` per occurrence, then ``union``
 Target Definition      ``select`` of the connected columns + ``target``
 anything else          a placeholder step, flagged for a person to rewrite
 =====================  ==========================================================
@@ -458,6 +460,8 @@ class _MappingConverter:
             "router": self.router,
             "union transformation": self.union,
             "sorter": self.sorter,
+            "rank": self.rank,
+            "normalizer": self.normalizer,
             "update strategy": self.update_strategy,
             "sequence": self.sequence,
             "sequence generator": self.sequence,
@@ -1049,6 +1053,104 @@ class _MappingConverter:
         self.note(CONVERTED, "sorting isn't needed: row order doesn't matter to set-based steps")
         return dict(refs)
 
+    def rank(self, name: str, inst: ET.Element, tdef: ET.Element) -> dict[str, Any]:
+        """Top or bottom N rows per group: a RANK() window and a filter on it."""
+        ports = _ports(tdef, "TRANSFORMFIELD")
+        refs = self.refs(name, [p for p in ports if p.has("INPUT")])
+        base, colmap = self.merge(refs, _slug(name))
+        if base is None:
+            raise _Manual("nothing is connected to it")
+        a = self.attrs(name, tdef)
+        rank_port = next((p for p in ports if p.has("MASTER") or p.has("RANK")), None)  # the port marked R
+        if rank_port is None or rank_port.name not in colmap:
+            raise _Manual("its rank port isn't connected")
+        extra = [p for p in ports if p.has("OUTPUT") and not p.has("INPUT") and p.name != "RANKINDEX"]
+        if extra:
+            raise _Manual(f"output port(s) {', '.join(p.name for p in extra)} compute values in the rank, "
+                          "which isn't supported yet")
+        groups = list(dict.fromkeys(colmap[p.name] for p in ports if p.exprtype == "GROUPBY" and p.name in colmap))
+        top = a.get("TOP/BOTTOM", "Top").strip().lower() != "bottom"
+        try:
+            n = int(float(self.subst(a.get("NUMBER OF RANKS", "1")).strip() or 1))
+        except ValueError as e:
+            raise _Manual(f"its number of ranks isn't a number: {a.get('NUMBER OF RANKS')!r}") from e
+        index = self.fresh("rankindex", base)
+        order = f"{colmap[rank_port.name]} {'DESC' if top else 'ASC'} NULLS LAST"
+        over = (f"PARTITION BY {', '.join(groups)} " if groups else "") + f"ORDER BY {order}"
+        node = self.imp.add("derive", [base], {"columns": {index: f"RANK() OVER ({over})"}}, f"{_slug(name)}_index",
+                            "chain")
+        node = self.imp.add("filter", [node], {"condition": f"{index} <= {n}"}, _slug(name), "active")
+        per = f" per {', '.join(groups)}" if groups else ""
+        self.note(CONVERTED, f"keeps the {'top' if top else 'bottom'} {n} by {colmap[rank_port.name]}{per}; "
+                             "tied rows share a rank index and the next one is skipped, as in PowerCenter; "
+                             "NULLs rank last")
+        if rank_port.kind == "string":
+            self.note(REVIEW, "ranks strings: PowerCenter compares them in the session's sort order, the "
+                              "target engine in its own collation")
+        env: dict[str, Any] = {p: _Col(node, c) for p, c in colmap.items()}
+        env["RANKINDEX"] = _Col(node, index)
+        return env
+
+    def normalizer(self, name: str, inst: ET.Element, tdef: ET.Element) -> dict[str, Any]:
+        """One row per occurrence: a column that occurs N times (SALES_in1..SALES_inN) becomes N rows."""
+        ports = _ports(tdef, "TRANSFORMFIELD")
+        refs = self.refs(name, [p for p in ports if p.has("INPUT")])
+        base, colmap = self.merge(refs, _slug(name))
+        if base is None:
+            raise _Manual("nothing is connected to it")
+        outputs = [p for p in ports if p.has("OUTPUT")]
+        inputs = {p.name for p in ports if p.has("INPUT")}
+        occurs: dict[str, list[str]] = {}   # output port -> its input ports, by occurrence
+        single: dict[str, str] = {}         # output port -> its one input port
+        index_of: dict[str, str] = {}       # GCID_X -> X
+        keys: list[str] = []                # GK_X
+        for p in outputs:
+            if p.name.startswith("GCID_"):
+                index_of[p.name] = p.name[5:]
+            elif p.name.startswith("GK_"):
+                keys.append(p.name)
+            elif p.has("INPUT"):
+                single[p.name] = p.name
+            else:
+                numbered = sorted(((int(m.group(2)), q) for q in inputs
+                                   if (m := re.fullmatch(rf"{re.escape(p.name)}(_IN)?(\d+)", q))), key=lambda x: x[0])
+                if numbered:
+                    occurs[p.name] = [q for _, q in numbered]
+                elif f"{p.name}_IN" in inputs:
+                    single[p.name] = f"{p.name}_IN"
+                else:
+                    raise _Manual(f"can't tell which input ports feed {p.name}")
+        if not occurs:
+            raise _Manual("no port occurs more than once, so there's nothing to normalize")
+        counts = {len(v) for v in occurs.values()}
+        if len(counts) != 1:
+            raise _Manual("its multiple-occurring columns occur a different number of times (nested occurs)")
+        used_keys = [k for k in keys if k in self.used[name]]
+        if used_keys:
+            raise _Manual(f"{', '.join(used_keys)} is a generated key that keeps counting across runs; "
+                          "rewrite it as a surrogate key in the target")
+        imp = self.imp
+        names = {p.name: _slug(p.name) for p in outputs if not p.name.startswith("GK_")}
+        branches = []
+        for i in range(counts.pop()):
+            cols: dict[str, str] = {}
+            for out, src in single.items():
+                cols[names[out]] = colmap[src] if src in colmap else "NULL"
+            for out, srcs in occurs.items():
+                cols[names[out]] = colmap[srcs[i]] if srcs[i] in colmap else "NULL"
+            for gcid, out in index_of.items():
+                if out in occurs:
+                    cols[names[gcid]] = str(i + 1)
+            derive = imp.add("derive", [base], {"columns": cols}, f"{_slug(name)}_{i + 1}_values", "branch")
+            branches.append(imp.add("select", [derive], {"columns": list(cols)}, f"{_slug(name)}_{i + 1}", "branch"))
+        node = imp.add("union", branches, {}, _slug(name), "active")
+        n = len(branches)
+        names = {p: c for p, c in names.items() if c in (self.b.cols[node] or [])}
+        self.note(CONVERTED, f"each input row becomes {n} rows, one per occurrence of "
+                             f"{', '.join(o.lower() for o in occurs)}" + (", numbered by " +
+                             ", ".join(g.lower() for g in index_of) if index_of else ""))
+        return {p: _Col(node, c) for p, c in names.items()}
+
     def update_strategy(self, name: str, inst: ET.Element, tdef: ET.Element) -> dict[str, Any]:
         ports = _ports(tdef, "TRANSFORMFIELD")
         refs = self.refs(name, ports)
@@ -1247,7 +1349,7 @@ def import_powercenter(xml: str, mapping: str | list[str] | None = None, name: s
         mname = (m.get("NAME") or "").upper()
         sess = session_of.get(mname)
         file_params = resolve_params(sections, folder_of[id(m)], sess.workflow if sess else None,
-                                     sess.name if sess else None) if sections else {}
+                                     sess.name if sess else None, sess.worklet if sess else None) if sections else {}
         before = len(imp.items)
         _MappingConverter(imp, m, sess, file_params).run()
         if mname in extra_sessions and len(imp.items) > before:
@@ -1290,7 +1392,7 @@ _TASK_ADVICE = {
     "event wait": (MANUAL, "waits for an event or file; use your orchestrator's sensors"),
     "event raise": (MANUAL, "raises an event; use your orchestrator's triggers"),
     "control": (MANUAL, "stops or fails the workflow; use your orchestrator's failure handling"),
-    "worklet": (MANUAL, "worklets aren't expanded yet"),
+    "worklet": (MANUAL, "can't be expanded"),
 }
 
 
@@ -1300,7 +1402,8 @@ def _workflow_items(imp: "_Importer", wf: Workflow, sessions: dict[str, Session]
     for t in wf.order:
         if t in wf.sessions:
             sess = sessions.get(wf.sessions[t])
-            steps.append(f"{sess.label} (runs {sess.mapping.lower()})" if sess else t)
+            shown = wf.labels.get(t, sess.label if sess else t)
+            steps.append(f"{shown} (runs {sess.mapping.lower()})" if sess else shown)
         elif t in wf.tasks and wf.tasks[t].type.lower() != "start":
             steps.append(wf.tasks[t].label)
     item = ScoreItem(wf.label, "Workflow", area="orchestration")

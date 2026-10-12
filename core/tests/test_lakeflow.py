@@ -50,6 +50,7 @@ PIPELINES = {
                                            name="teradata_revenue").pipeline,
     "wf_customer_revenue": lambda: import_powercenter((PC / "wf_customer_revenue.xml").read_text(),
                                                       params=(PC / "wf_customer_revenue.par").read_text()).pipeline,
+    "wf_store_mart": lambda: import_powercenter((PC / "wf_store_mart.xml").read_text()).pipeline,
 }
 
 # Stand-ins for the warehouse tables that table sources read in place.

@@ -47,6 +47,8 @@ TABLES = {
     "regions": "region STRING, manager STRING, monthly_target DECIMAL(12,2)",
     "web_events": "event_id STRING, user_id INT, event_time TIMESTAMP, event_name STRING",
     "app_events": "event_id STRING, user_id INT, event_time TIMESTAMP, event_name STRING",
+    "store_sales": "store_id INT, region STRING, q1_sales DECIMAL(12,2), q2_sales DECIMAL(12,2), "
+                   "q3_sales DECIMAL(12,2), q4_sales DECIMAL(12,2)",
 }
 
 
@@ -155,6 +157,8 @@ PIPELINES = {
     "teradata_revenue": teradata,
     "m_customer_revenue": powercenter,
     "wf_customer_revenue": workflow,  # mapplet, session overrides, parameter file, post-SQL
+    "wf_store_mart": lambda: import_powercenter(  # Normalizer, Rank (ties, NULLs), worklet
+        (ROOT / "examples" / "legacy" / "powercenter" / "wf_store_mart.xml").read_text()).pipeline,
 }
 
 

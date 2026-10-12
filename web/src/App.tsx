@@ -25,6 +25,7 @@ type Precomputed = { analysis: Analysis; counts: Record<string, number>; impacts
 type Samples = {
   tables: string[]; specs: Record<string, Spec>; legacy: string; powercenter: string;
   workflow: { xml: string; params: string };
+  storeMart: string;
   precomputed: Record<string, Precomputed>;
 };
 type EngineState = { state: "loading" | "ready" | "failed"; ms?: number; error?: string };
@@ -73,7 +74,7 @@ export default function App() {
   const [activeItem, setActiveItem] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("step");
   const [importing, setImporting] = useState<{
-    mode: ImportMode | null; busy: boolean; error: string | null; workflow?: boolean;
+    mode: ImportMode | null; busy: boolean; error: string | null; sample?: "workflow" | "store";
   }>({ mode: null, busy: false, error: null });
   const [toast, setToast] = useState<string | null>(null);
   const [example, setExample] = useState("orders_revenue");
@@ -476,7 +477,9 @@ export default function App() {
                 <MenuItem icon={Workflow} title="PowerCenter mapping" sub="11 transformations, 2 targets"
                   onClick={() => { close(); setImporting({ mode: "powercenter", busy: false, error: null }); }} />
                 <MenuItem icon={Workflow} title="PowerCenter workflow" sub="Mapplet, session, parameter file, tasks"
-                  onClick={() => { close(); setImporting({ mode: "powercenter", busy: false, error: null, workflow: true }); }} />
+                  onClick={() => { close(); setImporting({ mode: "powercenter", busy: false, error: null, sample: "workflow" }); }} />
+                <MenuItem icon={Workflow} title="PowerCenter store mart" sub="Normalizer, Rank, worklet"
+                  onClick={() => { close(); setImporting({ mode: "powercenter", busy: false, error: null, sample: "store" }); }} />
               </>
             )}
           </Menu>
@@ -588,9 +591,11 @@ export default function App() {
       {importing.mode && samples && (
         <ImportDialog
           mode={importing.mode}
-          samples={(importing.workflow
+          samples={(importing.sample === "workflow"
             ? { sql: samples.legacy, powercenter: samples.workflow.xml, params: samples.workflow.params }
-            : { sql: samples.legacy, powercenter: samples.powercenter }) satisfies ImportSamples}
+            : importing.sample === "store"
+              ? { sql: samples.legacy, powercenter: samples.storeMart }
+              : { sql: samples.legacy, powercenter: samples.powercenter }) satisfies ImportSamples}
           busy={importing.busy}
           error={importing.error}
           onImport={doImport}

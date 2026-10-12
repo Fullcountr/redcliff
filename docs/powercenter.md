@@ -33,6 +33,12 @@ file check and an email. Its pipeline returns exactly the rows of the plain mapp
 on Spark. Three of the 17 scorecard items are workflow tasks (the run order, a shell command, an
 email), which belong in an orchestrator; without them it's the same 12 of 14.
 
+A third example, [`wf_store_mart.xml`](../examples/legacy/powercenter/wf_store_mart.xml), turns
+quarterly sales stored one column per quarter into rows with a **Normalizer**, keeps each store's two
+best quarters with a **Rank** (with a tie and a missing quarter in the data), finds each region's best
+store with an Aggregator and a second Rank, and runs its session inside a **worklet**. Its rows are
+checked against answers worked out by hand, in DuckDB, on Spark, through dbt and as a Lakeflow pipeline.
+
 The example above is [`examples/legacy/powercenter/m_customer_revenue.xml`](../examples/legacy/powercenter/m_customer_revenue.xml),
 an invented mapping. The test suite runs its converted pipeline in DuckDB and compares the rows
 with answers worked out by hand.
@@ -68,10 +74,12 @@ playground's Migration tab.
 | Sorter | nothing, or `aggregate` when Distinct | row order doesn't matter to set-based steps |
 | Update Strategy | nothing, or a `filter` that drops `DD_REJECT` rows | `DD_UPDATE` / `DD_DELETE` are **review**: they need a MERGE in the target |
 | Sequence Generator | a `ROW_NUMBER()` column where it's used | **review**: numbers restart every run |
+| Rank | `derive` with `RANK() OVER (PARTITION BY <group by ports> ORDER BY <rank port>)` + `filter` on it | top or bottom N per group; ties share a rank index and the next one is skipped, as PowerCenter's RANKINDEX does; NULLs rank last; ranking a string port is **review** (collations differ) |
+| Normalizer | one `derive` + `select` per occurrence, then `union` | `SALES_in1`…`SALES_in4` (or `SALES1`…) feed `SALES`; `GCID_SALES` numbers the occurrence; a connected `GK_` generated key is **manual** |
 | Transaction Control | nothing | rows pass through |
 | Target Definition | `select` of the connected ports + `target` | `mode: append`, since PowerCenter inserts; unconnected target columns are noted |
 | Mapplet | its transformations, inlined | named `MAPPLET/TRANSFORMATION` on the scorecard and `mapplet__transformation` in the spec; nested mapplets too |
-| Normalizer, Java, Stored Procedure, unconnected Lookup, anything else | a placeholder step | **manual** |
+| Java, Stored Procedure, SQL transformation, unconnected Lookup, anything else | a placeholder step | **manual** |
 
 ## Sessions, workflows and parameter files
 
@@ -81,8 +89,9 @@ playground's Migration tab.
 | Truncate target table option | the target's `mode: overwrite` (otherwise `append`) |
 | Target Pre SQL / Post SQL | the target's `pre_sql` / `post_sql`, translated from the target database's dialect; Spark SQL and PySpark run them |
 | Source qualifier Pre SQL / Post SQL | **review**: it runs on the source database, which Redcliff doesn't touch |
-| Parameter file | `$$PARAMS` resolved per session (`[folder.WF:wf.ST:session]` beats `[folder.WF:wf]` beats `[Global]`), in expressions and in SQL text; each use is **review**, because the value is baked in |
+| Parameter file | `$$PARAMS` resolved per session (`[folder.WF:wf.WT:worklet.ST:session]` beats `[folder.WF:wf.ST:session]` beats `[session]` beats `[folder.WF:wf]` beats `[Global]`), in expressions and in SQL text; each use is **review**, because the value is baked in |
 | Workflow | sets the order of its sessions' mappings; the run order and link conditions are noted (**review**: recreate them in your orchestrator) |
+| Worklet | expanded in place: its sessions and tasks join the run order where it runs (`wklt_load/s_m_store_sales`), nested worklets too; `[folder.WF:wf.WT:worklet.ST:session]` parameter sections apply |
 | Command, Email, Timer, Event Wait/Raise, Control tasks | **manual**, with the command, address or condition in the note |
 | Decision, Assignment tasks | **review** |
 
@@ -122,9 +131,10 @@ trim sets), `UPPER`, `LOWER`, `LENGTH`, `INSTR`, `LPAD`, `RPAD`, `REPLACESTR`, `
 
 ## Not yet
 
-- Worklets aren't expanded, and reusable session configurations (config objects) aren't read.
+- Reusable session configurations (config objects) aren't read.
 - Connection objects and `$PM...` built-in variables are ignored.
-- Rank, Normalizer, Java, Stored Procedure and SQL transformations have no step type yet.
+- Java, Stored Procedure and SQL transformations have no step type yet, nor do Rank ports that
+  compute values or Normalizers with nested occurs (VSAM sources).
 
 Found a mapping that imports badly? Please open an issue with a small, **invented** export that
 shows the problem. Never share an employer's or a client's real mappings.

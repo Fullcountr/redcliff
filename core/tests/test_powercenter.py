@@ -233,16 +233,16 @@ def test_sorter_distinct_and_plain():
 
 
 def test_unsupported_transformation_becomes_a_typed_placeholder(con):
-    nrm = transform("NRM_X", "Normalizer", [port("STATUS", "INPUT"), port("CODE:decimal", "OUTPUT")])
-    r = simple([nrm], [("NRM_X", "TRANSFORMATION", "Normalizer"), ("T", "TARGET", "Target Definition")],
-               ["SQ_ORDERS.STATUS -> NRM_X.STATUS", "NRM_X.CODE -> T.CODE"], [target("T", "CODE:decimal")])
-    item = next(i for i in r.scorecard.items if i.name == "NRM_X")
+    jtx = transform("JTX_X", "Java", [port("STATUS", "INPUT"), port("CODE:decimal", "OUTPUT")])
+    r = simple([jtx], [("JTX_X", "TRANSFORMATION", "Java"), ("T", "TARGET", "Target Definition")],
+               ["SQ_ORDERS.STATUS -> JTX_X.STATUS", "JTX_X.CODE -> T.CODE"], [target("T", "CODE:decimal")])
+    item = next(i for i in r.scorecard.items if i.name == "JTX_X")
     assert item.status == "manual"
-    assert "Normalizer transformations have no Redcliff equivalent yet" in item.notes[0]
-    assert r.pipeline.node("nrm_x").params == {"columns": {"code": "CAST(NULL AS DECIMAL(10,2))"}}
+    assert "Java transformations have no Redcliff equivalent yet" in item.notes[0]
+    assert r.pipeline.node("jtx_x").params == {"columns": {"code": "CAST(NULL AS DECIMAL(10,2))"}}
     assert all(row == (None,) for row in rows(con, r, r.outputs[0]))
     assert r.scorecard.lineage["untraced"] == ["t.code"]
-    assert any("NRM_X" in w for w in r.warnings)
+    assert any("JTX_X" in w for w in r.warnings)
 
 
 def test_stateful_variable_port_is_manual():

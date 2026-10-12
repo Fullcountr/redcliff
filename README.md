@@ -100,7 +100,7 @@ step, with a note. Nothing is dropped silently.
 <td width="50%" valign="top">
 
 **Import Informatica PowerCenter mappings.** Source qualifiers, expressions, joiners, lookups,
-routers, aggregators and more become steps, and the Informatica expression language becomes SQL
+routers, aggregators, ranks, normalizers and more become steps, and the Informatica expression language becomes SQL
 that keeps its quirks. A **migration scorecard** grades every transformation: converted, needs
 review, or rewrite by hand, with the reason.
 
@@ -357,9 +357,11 @@ right-hand copy, Redcliff renames that copy before the join, so no value is lost
 | Union | `select` per group, then `union` |
 | Sorter, Update Strategy | nothing, or a distinct `aggregate`, or a `filter` that drops rejected rows |
 | Sequence Generator | `ROW_NUMBER()`, flagged for review |
+| Rank | a `RANK()` window and a `filter`: top or bottom N per group, ties as PowerCenter ranks them |
+| Normalizer | one row per occurrence: a `select` per occurrence, then `union` |
 | Mapplet | its transformations, inlined (nested mapplets too) |
-| Session, parameter file, workflow | overrides applied, truncate and pre/post SQL carried to the target, `$$PARAMS` resolved, run order and tasks graded |
-| Normalizer, Java and others | a typed placeholder, flagged as manual |
+| Session, parameter file, workflow, worklet | overrides applied, truncate and pre/post SQL carried to the target, `$$PARAMS` resolved, worklets expanded, run order and tasks graded |
+| Java, Stored Procedure and others | a typed placeholder, flagged as manual |
 
 The expression language (`IIF`, `DECODE`, `TO_DATE`, `ADD_TO_DATE`, `$$PARAMS` and about 50
 more) is translated with PowerCenter's semantics where SQL differs. A folder export becomes one
@@ -421,7 +423,7 @@ flowchart LR
 | Diff | step, column, lineage and row changes for edited examples, worked out by hand; `--git` mode on a scratch repository |
 | MCP | the protocol over real stdio, every tool, and edits: proposed without writing, applied once, refused when stale or broken, untouched steps kept byte for byte |
 | Importer | the original SQL and the imported, recompiled pipeline must return identical rows |
-| PowerCenter | the sample mapping runs in DuckDB and must match rows worked out by hand; the same job rebuilt with a mapplet, session, workflow and parameter file must return identical rows; every transformation type and scorecard status has a test |
+| PowerCenter | the sample mapping runs in DuckDB and must match rows worked out by hand; the same job rebuilt with a mapplet, session, workflow and parameter file must return identical rows; a store mart with a Normalizer, two Ranks (a tie, a NULL) and a worklet matches rows worked out by hand; every transformation type and scorecard status has a test |
 | Expressions | each Informatica expression runs in DuckDB and must return PowerCenter's answer |
 | CLI | a legacy Teradata job goes through import, validate, compile, lineage and run |
 | Spark | generated Spark SQL and PySpark run on real Spark and must match DuckDB, row for row; Informatica expressions too |
@@ -432,7 +434,7 @@ flowchart LR
 CI runs all of it on every push, including the browser test and a real Spark: the generated
 Spark SQL (queries and full scripts that write tables) and PySpark scripts run on a local Spark 4
 with its defaults, ANSI mode included, and must return DuckDB's rows for every example, the
-imported Teradata job and the imported PowerCenter mapping.
+imported Teradata job and the imported PowerCenter exports.
 
 ### Repository layout
 
@@ -440,7 +442,7 @@ imported Teradata job and the imported PowerCenter mapping.
 | --- | --- |
 | [`core/`](core) | the Python package: spec, compiler, lineage, row trace, diff, importers, CLI, MCP server, browser bridge |
 | [`web/`](web) | the playground: React, React Flow, Pyodide worker, DuckDB-Wasm |
-| [`examples/`](examples) | sample data, example pipelines, a legacy Teradata job and a PowerCenter mapping |
+| [`examples/`](examples) | sample data, example pipelines, a legacy Teradata job and three PowerCenter exports |
 | [`docs/`](docs) | spec reference, architecture notes, importer guides, outputs, the pull request bot, the MCP server |
 | [`action.yml`](action.yml) | the pull request bot as a GitHub Action |
 | [`spikes/`](spikes) | small experiments that proved an approach |
@@ -475,6 +477,7 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 - [x] Browser playground with previews and share links
 - [x] Informatica PowerCenter XML importer, with a migration scorecard
 - [x] Mapplet expansion and session/workflow import (pre/post SQL, parameter files)
+- [x] PowerCenter Rank, Normalizer and worklets
 - [x] Spark SQL and PySpark run against real Spark in CI
 - [x] dbt and Lakeflow pipeline outputs, both run in CI
 - [x] Row-level trace: click an output row, see the input rows behind it

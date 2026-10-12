@@ -247,6 +247,20 @@ await step("a share link restores the pipeline", async () => {
   await fresh.close();
 });
 
+await step("a PowerCenter store mart imports its Normalizer, Ranks and worklet", async () => {
+  await page.locator(".topbar").getByRole("button", { name: "Examples" }).click();
+  await page.getByRole("menuitem", { name: /PowerCenter store mart/ }).click();
+  await page.waitForSelector("dialog[open]");
+  await page.locator("dialog").getByRole("button", { name: "Import", exact: true }).click();
+  await page.waitForSelector("dialog[open]", { state: "detached" });
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="nrm_quarters"] .step-rows')?.textContent === "16 rows", null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="rnk_best_quarters"] .step-rows')?.textContent === "9 rows", null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="rnk_top_store"] .step-rows')?.textContent === "2 rows", null, { timeout: 30000 });
+  const items = await page.locator(".score-item .name").allTextContents();
+  assert.ok(items.includes("wf_store_mart/wklt_load/cmd_archive_extract"), items.join(", "));
+  await shot(page, "14-store-mart");
+});
+
 await step("works on a phone-sized screen and in dark mode", async () => {
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: "dark" });
   const p = await phone.newPage();
