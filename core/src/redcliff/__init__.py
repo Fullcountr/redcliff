@@ -8,7 +8,7 @@ from redcliff.powercenter import PowerCenterImportError, import_powercenter
 from redcliff.scorecard import Scorecard, ScoreItem
 from redcliff.spec import Issue, Node, Pipeline, SpecError, json_schema, load_spec, parse_spec, validate
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
 
 __all__ = [
     "CompileError",

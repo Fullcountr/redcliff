@@ -1,0 +1,70 @@
+name: Release
+
+# Push a tag like v0.1.0 to publish the `redcliff` package to PyPI and make a GitHub release.
+# PyPI trusted publishing: no token is stored here. On pypi.org, add a trusted publisher for
+# this repository, workflow `release.yml` and environment `pypi` (see docs/releasing.md).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: The tag matches the package version
+        run: |
+          version=$(python -c "import re; print(re.search(r'__version__ = \"(.+)\"', open('src/redcliff/__init__.py').read())[1])")
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "::error::tag $GITHUB_REF_NAME but the package says $version"; exit 1; }
+      - run: pip install -e ".[dev]" build twine ruff
+      - run: ruff check .
+      - run: pytest -q
+      - run: python -m build && twine check dist/*
+      - name: The wheel installs and runs
+        run: |
+          python -m venv /tmp/check && /tmp/check/bin/pip install "$(ls dist/*.whl)[cli]"
+          /tmp/check/bin/redcliff --version
+          /tmp/check/bin/redcliff test ../examples/specs/orders_revenue.yaml
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: core/dist/
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/redcliff/
+    permissions:
+      id-token: write  # trusted publishing
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes

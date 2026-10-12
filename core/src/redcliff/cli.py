@@ -401,7 +401,10 @@ def cmd_mcp(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from redcliff import __version__
+
     parser = argparse.ArgumentParser(prog="redcliff", description="Legacy ETL in, clean Spark out.")
+    parser.add_argument("--version", action="version", version=f"redcliff {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("import", help="turn legacy SQL or a PowerCenter mapping into a pipeline spec")

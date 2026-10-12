@@ -163,3 +163,11 @@ def test_trace_a_row_to_its_sources(capsys):
     assert out.startswith("revenue_by_region: region=South, revenue=330.50, order_count=3\n")
     assert "  from orders (3 rows):\n    #1: order_id=1," in out
     assert "#8: order_id=8" in out and "#2: order_id=2" not in out
+
+
+def test_version(capsys):
+    import redcliff
+
+    with pytest.raises(SystemExit):
+        main(["--version"])
+    assert capsys.readouterr().out.strip() == f"redcliff {redcliff.__version__}"

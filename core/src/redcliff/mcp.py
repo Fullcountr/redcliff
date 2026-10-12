@@ -23,13 +23,14 @@ from pathlib import Path
 from typing import Any
 from collections.abc import Callable
 
+from redcliff import __version__
 from redcliff.compile import compile_pyspark, compile_query, compile_script
 from redcliff.diff import data_diff, diff_pipelines
 from redcliff.lineage import Ref, blast_radius, build_graph, trace_to_sources
 from redcliff.spec import Pipeline, SpecError, dump_spec, edit_spec_text, validate
 
 PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
-VERSION = "0.0.1"
+VERSION = __version__
 INSTRUCTIONS = """Redcliff pipelines are YAML specs: a list of steps (source, filter, select, derive,
 join, aggregate, union, sql, target) whose expressions are SQL. The spec is the source of truth;
 code and lineage are generated from it, so edit specs, never generated code.
