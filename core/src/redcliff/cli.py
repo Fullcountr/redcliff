@@ -424,6 +424,36 @@ def cmd_diff(args) -> int:
     return 1 if has_issues and args.fail_on_issues else 0
 
 
+def cmd_model(args) -> int:
+    from redcliff import model as m
+
+    if args.action == "import":
+        text = Path(args.file).read_text(encoding="utf-8")
+        name = args.name or Path(args.file).stem
+        result = m.from_dbml(text, name) if args.file.endswith(".dbml") else m.from_ddl(text, args.dialect, name)
+        for w in result.warnings:
+            _err(f"warning: {w}")
+        out = m.dump_model(result.model, "json" if (args.output or "").endswith(".json") else "yaml")
+    else:
+        model = m.load_model(args.file)
+        issues = m.validate_model(model)
+        for i in issues:
+            _err(f"error: {i}")
+        if issues:
+            return 1
+        if args.action == "validate":
+            print(f"{args.file}: valid ({len(model.entities)} entities, {len(model.relationships)} relationships)")
+            return 0
+        fn = m.EXPORTS[args.to]
+        out = fn(model, args.dialect or "duckdb") if args.to == "ddl" else fn(model)
+    if args.output:
+        Path(args.output).write_text(out, encoding="utf-8")
+        _err(f"wrote {args.output}")
+    else:
+        print(out, end="")
+    return 0
+
+
 def cmd_mcp(args) -> int:
     from redcliff.mcp import serve
 
@@ -511,6 +541,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-issues", action="store_true", help="exit 1 if a new spec has problems")
     p.add_argument("-o", "--output")
     p.set_defaults(func=cmd_diff)
+
+    p = sub.add_parser("model", help="data models: validate, export (DDL, DBML, Mermaid, dbt) or import (DDL, DBML)")
+    p.add_argument("action", choices=["validate", "export", "import"])
+    p.add_argument("file", help="model.yaml to validate or export; a .sql or .dbml file to import")
+    p.add_argument("--to", choices=["ddl", "dbml", "mermaid", "dbt"], default="ddl", help="export format")
+    p.add_argument("--dialect", help="SQL dialect for DDL export or import (default: duckdb)")
+    p.add_argument("--name", help="model name for an import (default: the file name)")
+    p.add_argument("-o", "--output", help="write to this file instead of printing")
+    p.set_defaults(func=cmd_model)
 
     p = sub.add_parser("mcp", help="run an MCP server over stdio, so AI agents can read and edit pipelines")
     p.add_argument("--root", default=".", help="the folder whose specs agents may read and edit (default: here)")

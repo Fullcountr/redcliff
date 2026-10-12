@@ -1,0 +1,40 @@
+# A Kimball model for the sample orders and customers (examples/data). See docs/modeling.md.
+version: 0
+name: sales
+style: kimball
+description: Orders by customer and day.
+entities:
+  - id: dim_customer
+    kind: dimension
+    description: One row per customer version (SCD2).
+    attributes:
+      - {name: customer_key, type: bigint, role: surrogate_key}
+      - {name: customer_id, type: integer, role: business_key}
+      - {name: first_name, type: varchar, history: scd1}
+      - {name: last_name, type: varchar, history: scd1}
+      - {name: email, type: varchar, history: scd1}
+      - {name: region, type: varchar}
+      - {name: signup_date, type: date}
+  - id: dim_date
+    kind: dimension
+    history: scd1
+    description: One row per calendar day.
+    attributes:
+      - {name: date_key, type: integer, role: surrogate_key}
+      - {name: calendar_date, type: date, role: business_key}
+      - {name: year, type: integer}
+      - {name: month, type: integer}
+      - {name: day_of_week, type: varchar}
+  - id: fct_orders
+    kind: fact
+    grain: one order
+    attributes:
+      - {name: order_id, type: integer, role: business_key}
+      - {name: customer_key, type: bigint}
+      - {name: customer_id, type: integer, description: durable key for as-is reporting (Type 7)}
+      - {name: order_date_key, type: integer}
+      - {name: status, type: varchar}
+      - {name: amount, type: "decimal(10,2)", role: measure}
+relationships:
+  - {from: fct_orders.customer_key, to: dim_customer.customer_key}
+  - {from: fct_orders.order_date_key, to: dim_date.date_key}
