@@ -507,6 +507,9 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 
 - [ ] `pip install redcliff` from PyPI: the release workflow is ready; it needs PyPI trusted publishing set up ([docs/releasing.md](docs/releasing.md))
 - [ ] VS Code extension: the canvas and lineage next to the spec file
+- [ ] OpenLineage run events from `redcliff run`, so a catalog such as Marquez sees each run with its column lineage
+- [ ] Talend and IBM DataStage importers
+- [ ] A side-by-side diff view in the playground, the same report the pull request bot posts
 
 ---
 
