@@ -40,7 +40,7 @@ export const engine = {
   analyze: (spec: Spec) => call<Analysis>("analyze", json(spec)),
   previewQuery: (spec: Spec, node: string) => call<{ sql: string; node: string }>("preview_query", json(spec), node),
   code: (spec: Spec, target: string, node?: string | null) =>
-    call<{ code: string }>("code", json(spec), target, node ?? null),
+    call<{ code: string; files?: Record<string, string> }>("code", json(spec), target, node ?? null),
   importSql: (sql: string, dialect: string, schema: Record<string, Record<string, string>>, name: string) =>
     call<ImportResult>("import_sql", sql, dialect, JSON.stringify(schema), name),
   importPowercenter: (xml: string, params?: string) => call<ImportResult>("import_powercenter", xml, null, params || null),

@@ -125,7 +125,8 @@ change, which steps' rows would change, and which steps would break if you renam
 <td valign="top">
 
 **Generate code you own.** Readable Spark SQL, PySpark or DuckDB SQL, one named block per step,
-each with a comment. No runtime, no lock-in: it's your code in your repo.
+each with a comment; or a whole **dbt project** or **Lakeflow Declarative Pipeline**. No runtime,
+no lock-in: it's your code in your repo.
 
 </td>
 <td valign="top">
@@ -372,6 +373,7 @@ pipeline, connected through the tables its mappings write and read. The full lis
 | `redcliff import EXPORT.xml [--params FILE.par] [--mapping NAME] [--scorecard report.md] -o pipeline.yaml` | PowerCenter export (mappings, mapplets, sessions, workflows) to spec, with a scorecard |
 | `redcliff validate pipeline.yaml` | structure plus column-level checks |
 | `redcliff compile pipeline.yaml --to spark\|pyspark\|duckdb [--node ID]` | generate code |
+| `redcliff compile pipeline.yaml --to dbt\|lakeflow -o DIR` | generate a dbt project or a Lakeflow Declarative Pipeline ([details](docs/outputs.md)) |
 | `redcliff lineage pipeline.yaml [--column N.C \| --impact N.C \| --openlineage N]` | lineage |
 | `redcliff run pipeline.yaml [--db file.duckdb] [--node ID]` | run or preview locally with DuckDB |
 
@@ -386,6 +388,7 @@ flowchart LR
   spec[(Pipeline spec<br/>YAML in Git)] --> compiler[Compiler]
   spec --> lineage[Lineage engine]
   compiler --> code[Spark SQL<br/>PySpark<br/>DuckDB SQL]
+  compiler --> projects[dbt project<br/>Lakeflow pipeline]
   compiler --> preview[Preview<br/>DuckDB-Wasm]
   lineage --> graph[Column graph<br/>blast radius<br/>OpenLineage]
 ```
@@ -415,6 +418,8 @@ flowchart LR
 | Expressions | each Informatica expression runs in DuckDB and must return PowerCenter's answer |
 | CLI | a legacy Teradata job goes through import, validate, compile, lineage and run |
 | Spark | generated Spark SQL and PySpark run on real Spark and must match DuckDB, row for row; Informatica expressions too |
+| dbt | every example becomes a dbt project, `dbt build` runs it with dbt-duckdb (seeds, hooks, file targets) and every target must match DuckDB |
+| Lakeflow | every example becomes a Lakeflow Declarative Pipeline, `spark-pipelines run` runs it on local Spark and every materialized view must match DuckDB |
 | Browser | headless Chromium drives the real app: boot, hover, blast radius, SQL and PowerCenter import, scorecard, preview, edit, share, phone layout; after every deploy it runs again against the live site |
 
 CI runs all of it on every push, including the browser test and a real Spark: the generated
@@ -463,10 +468,10 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 - [x] Informatica PowerCenter XML importer, with a migration scorecard
 - [x] Mapplet expansion and session/workflow import (pre/post SQL, parameter files)
 - [x] Spark SQL and PySpark run against real Spark in CI
+- [x] dbt and Lakeflow pipeline outputs, both run in CI
 - [ ] Row-level trace: click an output row, see the input rows behind it
 - [ ] MCP server, so AI agents can edit pipelines and show a diff before you accept
 - [ ] Pull request bot: lineage and data diffs posted on every PR
-- [ ] dbt and Lakeflow pipeline outputs
 
 ---
 

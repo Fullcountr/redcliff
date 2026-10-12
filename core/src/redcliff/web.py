@@ -88,8 +88,15 @@ def preview_query(spec: Any, node_id: str) -> dict[str, Any]:
 
 @_wrap
 def code(spec: Any, target: str, node_id: str | None = None) -> dict[str, Any]:
-    """Generated code for the whole pipeline (or one node) in duckdb, spark or pyspark."""
+    """Generated code for the whole pipeline (or one node) in duckdb, spark or pyspark; or a whole
+    project for dbt / lakeflow, as {"files": {path: content}}."""
     pipeline = _load(spec)
+    if target in ("dbt", "lakeflow"):
+        from redcliff.dbt import compile_dbt
+        from redcliff.lakeflow import compile_lakeflow
+
+        files = compile_dbt(pipeline, "databricks") if target == "dbt" else compile_lakeflow(pipeline)
+        return {"code": "", "files": files}
     if target == "pyspark":
         return {"code": compile_pyspark(pipeline)}
     if node_id and pipeline.node(node_id).type != "target":

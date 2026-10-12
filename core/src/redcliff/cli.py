@@ -4,6 +4,7 @@
     redcliff import mapping.xml -o pipeline.yaml --scorecard scorecard.md   (Informatica PowerCenter)
     redcliff validate pipeline.yaml
     redcliff compile pipeline.yaml --to spark
+    redcliff compile pipeline.yaml --to dbt -o my_dbt_project       (or --to lakeflow)
     redcliff lineage pipeline.yaml --impact orders.status
     redcliff run pipeline.yaml --db warehouse.duckdb
 """
@@ -111,9 +112,31 @@ def cmd_validate(args) -> int:
     return 0
 
 
+def _write_project(files: dict[str, str], out_dir: str | None) -> None:
+    if not out_dir:  # one stream, a header per file
+        for rel, content in files.items():
+            print(f"# ==== {rel}\n{content}", end="" if content.endswith("\n") else "\n")
+        return
+    for rel, content in files.items():
+        path = Path(out_dir) / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    _err(f"wrote {len(files)} files to {out_dir}")
+
+
 def cmd_compile(args) -> int:
     pipeline = load_spec(args.spec)
     base = Path(args.spec).parent if args.resolve_paths else None
+    if args.to == "dbt":
+        from redcliff.dbt import compile_dbt
+
+        _write_project(compile_dbt(pipeline, args.adapter, base_dir=Path(args.spec).parent), args.output)
+        return 0
+    if args.to == "lakeflow":
+        from redcliff.lakeflow import compile_lakeflow
+
+        _write_project(compile_lakeflow(pipeline, base_dir=base, storage=args.storage), args.output)
+        return 0
     if args.to == "pyspark":
         out = compile_pyspark(pipeline, base_dir=base)
     elif args.node:
@@ -201,12 +224,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("spec")
     p.set_defaults(func=cmd_validate)
 
-    p = sub.add_parser("compile", help="generate DuckDB SQL, Spark SQL or PySpark")
+    p = sub.add_parser("compile", help="generate DuckDB SQL, Spark SQL, PySpark, a dbt project or a Lakeflow pipeline")
     p.add_argument("spec")
-    p.add_argument("--to", choices=["duckdb", "spark", "pyspark"], default="duckdb")
+    p.add_argument("--to", choices=["duckdb", "spark", "pyspark", "dbt", "lakeflow"], default="duckdb")
+    p.add_argument("--adapter", default="duckdb", help="dbt: the adapter to write SQL for (duckdb, databricks, "
+                   "spark, snowflake, bigquery, postgres, redshift)")
+    p.add_argument("--storage", help="lakeflow: checkpoint root, an absolute URI (file://..., s3a://...)")
     p.add_argument("--node", help="compile a SELECT for one node instead of the full script")
     p.add_argument("--resolve-paths", action="store_true", help="make file paths absolute")
-    p.add_argument("-o", "--output")
+    p.add_argument("-o", "--output", help="a file; for dbt and lakeflow, a directory")
     p.set_defaults(func=cmd_compile)
 
     p = sub.add_parser("lineage", help="column lineage, blast radius or OpenLineage export")
@@ -230,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except (SpecError, SQLImportError, CompileError, FileNotFoundError, KeyError) as e:
+    except (SpecError, SQLImportError, CompileError, FileNotFoundError, KeyError, ValueError) as e:
         _err(f"error: {e}")
         return 1
 

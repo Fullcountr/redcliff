@@ -20,7 +20,8 @@ jobs:
       - run: pytest
 
   spark:
-    # Runs the generated Spark SQL and PySpark on a real local Spark and compares with DuckDB.
+    # Runs the generated Spark SQL, PySpark and Lakeflow pipelines on a real local Spark and
+    # compares every target with DuckDB.
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -34,8 +35,22 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - run: pip install -e ".[dev]" "pyspark>=4.0,<5"
-      - run: pytest tests/test_spark.py -v
+      - run: pip install -e ".[dev]" "pyspark[pipelines]>=4.1,<5"
+      - run: pytest tests/test_spark.py tests/test_lakeflow.py -v
+
+  dbt:
+    # Builds the generated dbt projects with dbt-duckdb and compares every target with DuckDB.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]" "dbt-duckdb>=1.9"
+      - run: pytest tests/test_dbt.py -v
 
   web:
     runs-on: ubuntu-latest

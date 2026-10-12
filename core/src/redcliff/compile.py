@@ -314,9 +314,6 @@ def compile_pyspark(pipeline: Pipeline, base_dir=None) -> str:
     def v(node_id: str) -> str:  # Python variable for a node; avoids keywords like `class`
         return node_id + "_" if keyword.iskeyword(node_id) else node_id
 
-    def ex(neutral: str) -> str:
-        return f"F.expr({_expr(neutral, 'spark')!r})"
-
     for node in pipeline.topo_order():
         p, t, var = node.params, node.type, v(node.id)
         ins = [v(i) for i in node.inputs]
@@ -332,44 +329,13 @@ def compile_pyspark(pipeline: Pipeline, base_dir=None) -> str:
                     ddl = ", ".join(f"{c} {_type_sql(ty, 'spark')}" for c, ty in p["columns"].items())
                     reader += f".schema({ddl!r})"
             lines.append(f"{var} = {reader}.{p['format']}({_path(node, base_dir)!r})")
-        elif t == "filter":
-            lines.append(f"{var} = {ins[0]}.where({ex(p['condition'])})")
-        elif t == "select":
-            lines.append(f"{var} = {ins[0]}.select({', '.join(repr(c) for c in p['columns'])})")
-        elif t == "derive":
-            pairs = ", ".join(f"{c!r}: {ex(e)}" for c, e in p["columns"].items())
-            lines.append(f"{var} = {ins[0]}.withColumns({{{pairs}}})")
-        elif t == "join":
-            left, right = node.inputs
-            how = {"full": "full_outer"}.get(p.get("how", "inner"), p.get("how", "inner"))
-            stmt = (f"{var} = {ins[0]}.alias({left!r}).join({ins[1]}.alias({right!r}), "
-                    f"{ex(p['condition'])}, {how!r})")
-            lcols, rcols = cols[left], cols[right]
-            if lcols is not None and rcols is not None:
-                picks = [f"{left}.{c}" for c in lcols] + [f"{right}.{c}" for c in rcols if c not in lcols]
-                stmt += f".select({', '.join(repr(c) for c in picks)})"
-            lines.append(stmt)
-        elif t == "aggregate":
-            aggs = ", ".join(f"{ex(e)}.alias({c!r})" for c, e in (p.get("measures") or {}).items())
-            group_by = p.get("group_by", [])
-            if group_by and not aggs:
-                keys = ", ".join(repr(c) for c in group_by)
-                lines.append(f"{var} = {ins[0]}.select({keys}).distinct()")
-            elif group_by:
-                keys = ", ".join(repr(c) for c in group_by)
-                lines.append(f"{var} = {ins[0]}.groupBy({keys}).agg({aggs})")
-            else:
-                lines.append(f"{var} = {ins[0]}.agg({aggs})")
+        elif t in ("filter", "select", "derive", "join", "aggregate", "union"):
+            lines.append(f"{var} = {_dataframe(node, ins, cols)}")
         elif t == "sql":
             for name, df in zip(node.inputs, ins):
                 lines.append(f"{df}.createOrReplaceTempView({name!r})")
             query = _transpile(p["query"], "spark")
             lines.append(f"{var} = spark.sql({query!r})")
-        elif t == "union":
-            chain = ins[0] + "".join(f".union({i})" for i in ins[1:])
-            if p.get("distinct", False):
-                chain += ".distinct()"
-            lines.append(f"{var} = {chain}")
         elif t == "target":
             for sql in p.get("pre_sql") or []:
                 lines.append(f"spark.sql({_statement(sql, 'spark')!r})  # pre-SQL")
@@ -383,3 +349,41 @@ def compile_pyspark(pipeline: Pipeline, base_dir=None) -> str:
             for sql in p.get("post_sql") or []:
                 lines.append(f"spark.sql({_statement(sql, 'spark')!r})  # post-SQL")
     return "\n".join(lines) + "\n"
+
+
+def _dataframe(node: Node, ins: list[str], cols: dict[str, Columns]) -> str:
+    """The DataFrame expression for one transform step, given its inputs as Python expressions."""
+    p, t = node.params, node.type
+
+    def ex(neutral: str) -> str:
+        return f"F.expr({_expr(neutral, 'spark')!r})"
+
+    if t == "filter":
+        return f"{ins[0]}.where({ex(p['condition'])})"
+    if t == "select":
+        return f"{ins[0]}.select({', '.join(repr(c) for c in p['columns'])})"
+    if t == "derive":
+        pairs = ", ".join(f"{c!r}: {ex(e)}" for c, e in p["columns"].items())
+        return f"{ins[0]}.withColumns({{{pairs}}})"
+    if t == "join":
+        left, right = node.inputs
+        how = {"full": "full_outer"}.get(p.get("how", "inner"), p.get("how", "inner"))
+        expr = f"{ins[0]}.alias({left!r}).join({ins[1]}.alias({right!r}), {ex(p['condition'])}, {how!r})"
+        lcols, rcols = cols[left], cols[right]
+        if lcols is not None and rcols is not None:
+            picks = [f"{left}.{c}" for c in lcols] + [f"{right}.{c}" for c in rcols if c not in lcols]
+            expr += f".select({', '.join(repr(c) for c in picks)})"
+        return expr
+    if t == "aggregate":
+        aggs = ", ".join(f"{ex(e)}.alias({c!r})" for c, e in (p.get("measures") or {}).items())
+        group_by = p.get("group_by", [])
+        keys = ", ".join(repr(c) for c in group_by)
+        if group_by and not aggs:
+            return f"{ins[0]}.select({keys}).distinct()"
+        if group_by:
+            return f"{ins[0]}.groupBy({keys}).agg({aggs})"
+        return f"{ins[0]}.agg({aggs})"
+    if t == "union":
+        chain = ins[0] + "".join(f".union({i})" for i in ins[1:])
+        return chain + (".distinct()" if p.get("distinct", False) else "")
+    raise CompileError(f"{node.id}: no DataFrame form for node type {t!r}")

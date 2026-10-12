@@ -9,6 +9,7 @@ import { engine } from "../engine/engine";
 import type { Analysis, Impact, Scorecard, ScoreItem, ScoreStatus, Spec, Step, StepType } from "../model";
 import { STEP_LABELS, summarize } from "../model";
 import { STEP_ICONS, StepIcon, highlight } from "../ui";
+import { zip } from "../zip";
 
 export type Tab = "step" | "data" | "code" | "spec" | "migration";
 
@@ -310,8 +311,23 @@ function DataPanel({ spec, selected, analysis, ready }: Props) {
 const TARGETS = [
   { id: "spark", label: "Spark SQL" },
   { id: "pyspark", label: "PySpark" },
-  { id: "duckdb", label: "DuckDB SQL" },
+  { id: "duckdb", label: "DuckDB" },
+  { id: "dbt", label: "dbt" },
+  { id: "lakeflow", label: "Lakeflow" },
 ];
+
+const PROJECT_NOTE: Record<string, string> = {
+  dbt: "A dbt project for Databricks: steps are ephemeral models, targets are tables, and every column is documented with its lineage. On the CLI, --adapter picks another warehouse.",
+  lakeflow: "A Lakeflow Declarative Pipeline (pyspark.pipelines): steps are temporary views, targets materialized views. It runs on Databricks and with open-source spark-pipelines.",
+};
+
+/** The file a project opens on: the one a reader wants first. */
+function mainFile(target: string, files: Record<string, string>): string {
+  const names = Object.keys(files);
+  if (target === "lakeflow") return names.find((n) => n.endsWith(".py")) ?? names[0];
+  const models = names.filter((n) => n.startsWith("models/") && n.endsWith(".sql") && !/\/(int|src)_/.test(n));
+  return models.find((n) => /config\(/.test(files[n])) ?? models[0] ?? names[0];
+}
 
 function Starting({ what }: { what: string }) {
   return (
@@ -326,34 +342,58 @@ function CodePanel({ spec, selected, engineReady: ready }: Props) {
   const [target, setTarget] = useState("spark");
   const [scope, setScope] = useState<"pipeline" | "step">("pipeline");
   const [code, setCode] = useState("");
+  const [files, setFiles] = useState<Record<string, string> | null>(null);
+  const [file, setFile] = useState("");
   const [copied, setCopied] = useState(false);
-  const stepScope = scope === "step" && selected && selected.type !== "target" && target !== "pyspark";
+  const project = target === "dbt" || target === "lakeflow";
+  const stepScope = scope === "step" && selected && selected.type !== "target" && target !== "pyspark" && !project;
   useEffect(() => {
     if (!ready) return;
     let live = true;
     engine.code(spec, target, stepScope ? selected!.id : null).then((r) => {
-      if (live) setCode(r.ok ? r.code : `-- ${r.error}`);
+      if (!live) return;
+      if (r.ok && r.files) {
+        setFiles(r.files);
+        setFile((f) => (f in r.files! ? f : mainFile(target, r.files!)));
+      } else {
+        setFiles(null);
+        setCode(r.ok ? r.code : `-- ${r.error}`);
+      }
     });
     return () => { live = false; };
   }, [spec, target, stepScope, selected, ready]);
-  const coloured = useMemo(() => highlight(code, target === "pyspark"), [code, target]);
+  const shown = project ? (files?.[file] ?? "") : code;
+  const python = project ? !file.endsWith(".sql") : target === "pyspark";
+  const coloured = useMemo(() => highlight(shown, python), [shown, python]);
   const base = stepScope ? selected!.id : spec.name || "pipeline";
   if (!ready) return <Starting what="the code generator (Python in your browser)" />;
-  const fileName = target === "pyspark" ? `${base}.py` : `${base}.${target === "spark" ? "spark" : "duckdb"}.sql`;
+  const fileName = project ? file : target === "pyspark" ? `${base}.py` : `${base}.${target === "spark" ? "spark" : "duckdb"}.sql`;
+  const root = `${spec.name || "pipeline"}_${target}`;
   return (
     <section className="code">
-      <div className="row between">
-        <div className="segmented" role="group" aria-label="Language">
-          {TARGETS.map((t) => (
-            <button key={t.id} aria-pressed={target === t.id} onClick={() => setTarget(t.id)}>{t.label}</button>
-          ))}
-        </div>
+      <div className="segmented wrap" role="group" aria-label="Language">
+        {TARGETS.map((t) => (
+          <button key={t.id} aria-pressed={target === t.id} onClick={() => setTarget(t.id)}>{t.label}</button>
+        ))}
       </div>
-      {selected && selected.type !== "target" && target !== "pyspark" && (
+      {selected && selected.type !== "target" && target !== "pyspark" && !project && (
         <div className="segmented small" role="group" aria-label="Scope" style={{ marginTop: 8 }}>
           <button aria-pressed={scope === "pipeline"} onClick={() => setScope("pipeline")}>Whole pipeline</button>
           <button aria-pressed={scope === "step"} onClick={() => setScope("step")}>Up to {selected.id}</button>
         </div>
+      )}
+      {project && files && (
+        <>
+          <p className="quiet code-note">{PROJECT_NOTE[target]}</p>
+          <div className="row between project-bar">
+            <select className="file-select" value={file} onChange={(e) => setFile(e.target.value)} aria-label="File">
+              {Object.keys(files).filter((n) => !n.endsWith(".gitkeep")).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <button className="btn sm" onClick={() => downloadBlob(`${root}.zip`, zip(files, root))}>
+              <Download />Download .zip
+            </button>
+          </div>
+        </>
       )}
       <div className="code-shell">
         <div className="code-head">
@@ -361,7 +401,7 @@ function CodePanel({ spec, selected, engineReady: ready }: Props) {
           <button
             className="btn sm copy"
             onClick={async () => {
-              try { await navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard blocked */ }
+              try { await navigator.clipboard.writeText(shown); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard blocked */ }
             }}
           >
             {copied ? <Check /> : <Copy />}{copied ? "Copied" : "Copy code"}
@@ -376,7 +416,10 @@ function CodePanel({ spec, selected, engineReady: ready }: Props) {
 // ------------------------------------------------------------------ Spec
 
 function download(name: string, text: string, type: string) {
-  const blob = new Blob([text], { type });
+  downloadBlob(name, new Blob([text], { type }));
+}
+
+function downloadBlob(name: string, blob: Blob) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = name;

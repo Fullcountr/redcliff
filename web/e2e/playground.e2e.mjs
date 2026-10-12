@@ -126,6 +126,19 @@ await step("code tab generates Spark SQL and PySpark", async () => {
   await shot(page, "05-code");
 });
 
+await step("code tab generates dbt and Lakeflow projects", async () => {
+  await page.getByRole("button", { name: "dbt" }).click();
+  await page.waitForFunction(() => document.querySelector(".code-block")?.textContent?.includes("config(materialized="));
+  const names = await page.locator(".file-select option").allInnerTexts();
+  assert.ok(names.includes("dbt_project.yml") && names.includes("models/schema.yml"), names.join(", "));
+  await shot(page, "05-dbt");
+  await page.getByRole("button", { name: "Lakeflow" }).click();
+  await page.waitForFunction(() => document.querySelector(".code-block")?.textContent?.includes("@dp.materialized_view"));
+  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download .zip" }).click()]);
+  assert.match(download.suggestedFilename(), /_lakeflow\.zip$/);
+  await page.getByRole("button", { name: "Spark SQL" }).click();
+});
+
 await step("editing a step updates the pipeline", async () => {
   await page.locator('.react-flow__node[data-id="shipped"] .step-id').click();
   await page.getByRole("tab", { name: "Step" }).click();

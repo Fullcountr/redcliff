@@ -142,3 +142,15 @@ def test_import_powercenter_with_scorecard(tmp_path, capsys):
     assert main(["validate", str(spec)]) == 0
     assert main(["import", str(xml), "--scorecard", str(tmp_path / "card.json")]) == 0
     assert json.loads((tmp_path / "card.json").read_text())["counts"]["review"] == 2
+
+
+def test_compile_to_dbt_and_lakeflow(tmp_path, capsys):
+    spec = str(ROOT / "examples" / "specs" / "orders_revenue.yaml")
+    assert main(["compile", spec, "--to", "dbt", "-o", str(tmp_path / "dbt")]) == 0
+    assert (tmp_path / "dbt" / "dbt_project.yml").exists()
+    assert (tmp_path / "dbt" / "seeds" / "orders.csv").exists()  # CSV sources travel as seeds
+    assert main(["compile", spec, "--to", "lakeflow", "--storage", "s3a://bucket/x"]) == 0
+    out = capsys.readouterr().out
+    assert "# ==== spark-pipeline.yml" in out and "storage: s3a://bucket/x" in out
+    assert "@dp.materialized_view" in out
+    assert main(["compile", spec, "--to", "dbt", "--adapter", "oracle"]) == 1

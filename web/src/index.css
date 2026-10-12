@@ -847,3 +847,18 @@ tbody tr:last-child td { border-bottom: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* Code tab: generated projects (dbt, Lakeflow) */
+.segmented.wrap { flex-wrap: wrap; }
+.code-note { font-size: 12px; line-height: 1.5; margin: 10px 0 8px; }
+.project-bar { gap: 8px; margin-bottom: 10px; }
+.file-select {
+  flex: 1; min-width: 0; height: 28px; padding: 0 28px 0 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--text);
+  font-family: var(--font-mono); font-size: 11.5px; cursor: pointer;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-2) 50%), linear-gradient(135deg, var(--text-2) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 12px, calc(100% - 10px) 12px;
+  background-size: 4px 4px, 4px 4px; background-repeat: no-repeat;
+}
+.file-select:focus-visible { outline: 2px solid var(--oxide-soft); outline-offset: 1px; }
