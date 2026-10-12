@@ -20,7 +20,7 @@ nodes:
     type: filter
     inputs: [orders]
     params:
-      condition: status = 'shipped'
+      condition: status IN ('shipped', 'pending')
 
   - id: orders_with_region
     type: join
@@ -37,6 +37,7 @@ nodes:
       measures:
         revenue: SUM(amount)
         order_count: COUNT(*)
+        avg_amount: AVG(amount)
 
   - id: out
     type: target
