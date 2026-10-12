@@ -1,4 +1,6 @@
 # A Kimball model for the sample orders and customers (examples/data). See docs/modeling.md.
+# Proposed with `redcliff model propose ../data/orders.csv ../data/customers.csv`, then reviewed.
+# Load it: redcliff model pipeline sales.yaml -o load_sales.yaml && redcliff run load_sales.yaml --db w.duckdb
 version: 0
 name: sales
 style: kimball
@@ -7,32 +9,36 @@ entities:
   - id: dim_customer
     kind: dimension
     description: One row per customer version (SCD2).
+    source: ../data/customers.csv
     attributes:
       - {name: customer_key, type: bigint, role: surrogate_key}
-      - {name: customer_id, type: integer, role: business_key}
+      - {name: customer_id, type: bigint, role: business_key, source: id}
       - {name: first_name, type: varchar, history: scd1}
       - {name: last_name, type: varchar, history: scd1}
-      - {name: email, type: varchar, history: scd1}
+      - {name: email, type: varchar, history: scd1, source: "LOWER(TRIM(email))"}
       - {name: region, type: varchar}
       - {name: signup_date, type: date}
   - id: dim_date
     kind: dimension
     history: scd1
-    description: One row per calendar day.
+    description: One row per calendar day the facts refer to.
     attributes:
-      - {name: date_key, type: integer, role: surrogate_key}
+      - {name: date_key, type: integer, role: surrogate_key, source: "YEAR(calendar_date) * 10000 + MONTH(calendar_date) * 100 + DAY(calendar_date)"}
       - {name: calendar_date, type: date, role: business_key}
       - {name: year, type: integer}
+      - {name: quarter, type: integer}
       - {name: month, type: integer}
-      - {name: day_of_week, type: varchar}
+      - {name: day, type: integer}
   - id: fct_orders
     kind: fact
-    grain: one order
+    grain: one order (order_id)
+    source: ../data/orders.csv
     attributes:
-      - {name: order_id, type: integer, role: business_key}
-      - {name: customer_key, type: bigint}
-      - {name: customer_id, type: integer, description: durable key for as-is reporting (Type 7)}
-      - {name: order_date_key, type: integer}
+      - {name: order_id, type: bigint, role: business_key}
+      - {name: customer_key, type: bigint, source: customer_id}
+      - {name: customer_id, type: bigint, role: durable_key, description: "dim_customer.customer_id, for as-is reporting (Type 7)"}
+      - {name: order_date_key, type: integer, source: "YEAR(order_date) * 10000 + MONTH(order_date) * 100 + DAY(order_date)"}
+      - {name: order_date, type: date}
       - {name: status, type: varchar}
       - {name: amount, type: "decimal(10,2)", role: measure}
 relationships:

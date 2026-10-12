@@ -299,7 +299,7 @@ await step("an SSIS package imports with its data flow and control flow", async 
 
 await step("a data model shows as a diagram, exports DDL and Mermaid, and imports DDL", async () => {
   await page.locator(".topbar").getByRole("button", { name: "Examples" }).click();
-  await page.getByRole("menuitem", { name: /^sales/ }).click();
+  await page.getByRole("menuitem", { name: /^sales Kimball/ }).click();
   for (const id of ["dim_customer", "dim_date", "fct_orders"]) await page.waitForSelector(`[data-testid="entity-${id}"]`);
   assert.equal(await page.locator(".react-flow__edge.rel").count(), 2);
   await page.waitForSelector('[data-testid="model-valid"]', { timeout: 30000 });
@@ -316,6 +316,21 @@ await step("a data model shows as a diagram, exports DDL and Mermaid, and import
   await page.waitForSelector('[data-testid="entity-dim_product"]');
   await page.locator(".topbar").getByRole("button", { name: "Pipelines" }).click();
   await page.waitForSelector(".react-flow__node .step");
+});
+
+await step("a model proposed from the sample data opens its load as a pipeline", async () => {
+  await page.locator(".topbar").getByRole("button", { name: "Import" }).click();
+  await page.getByRole("menuitem", { name: /Data model/ }).click();
+  await page.getByRole("button", { name: /Propose a model from 2 tables/ }).click();
+  for (const id of ["dim_customer", "dim_date", "fct_orders"]) await page.waitForSelector(`[data-testid="entity-${id}"]`);
+  await page.locator('[data-testid="entity-dim_customer"]').click();
+  assert.match(await page.locator('[data-testid="model-why"]').textContent(), /unique and never null/);
+  await page.getByRole("tab", { name: "Load" }).click();
+  await page.waitForFunction(() => /fct_orders/.test(document.querySelector('[data-testid="model-load-targets"]')?.textContent ?? ""));
+  await shot(page, "17-model-load");
+  await page.getByRole("button", { name: "Open as a pipeline" }).click();
+  await page.waitForSelector('.react-flow__node[data-id="keyed_fct_orders"]');
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="stg_dim_customer"] .step-rows')?.textContent === "5 rows", null, { timeout: 30000 });
 });
 
 await step("works on a phone-sized screen and in dark mode", async () => {

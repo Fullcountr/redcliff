@@ -1,0 +1,106 @@
+# The sample orders and customers as Data Vault 2.0 (examples/data). See docs/modeling.md.
+# Proposed with redcliff.propose.to_data_vault; load it with `redcliff model pipeline sales_vault.yaml`.
+version: 0
+name: sales_vault
+style: data_vault
+description: The sample orders and customers as a Data Vault 2.0 model.
+entities:
+- id: hub_customer
+  kind: hub
+  source: ../data/customers.csv
+  attributes:
+  - name: customer_hk
+    type: char(32)
+    role: surrogate_key
+  - name: customer_id
+    type: bigint
+    role: business_key
+    source: id
+  - name: load_dts
+    type: timestamp
+  - name: record_source
+    type: varchar
+- id: sat_customer
+  kind: satellite
+  source: ../data/customers.csv
+  attributes:
+  - name: customer_hk
+    type: char(32)
+    role: surrogate_key
+    source: id
+  - name: load_dts
+    type: timestamp
+  - name: hashdiff
+    type: char(32)
+  - name: first_name
+    type: varchar
+  - name: last_name
+    type: varchar
+  - name: email
+    type: varchar
+  - name: region
+    type: varchar
+  - name: signup_date
+    type: date
+  - name: record_source
+    type: varchar
+- id: hub_order
+  kind: hub
+  source: ../data/orders.csv
+  attributes:
+  - name: order_hk
+    type: char(32)
+    role: surrogate_key
+  - name: order_id
+    type: bigint
+    role: business_key
+  - name: load_dts
+    type: timestamp
+  - name: record_source
+    type: varchar
+- id: lnk_order_customer
+  kind: link
+  source: ../data/orders.csv
+  attributes:
+  - name: order_customer_hk
+    type: char(32)
+    role: surrogate_key
+  - name: order_hk
+    type: char(32)
+    source: order_id
+  - name: customer_hk
+    type: char(32)
+    source: customer_id
+  - name: load_dts
+    type: timestamp
+  - name: record_source
+    type: varchar
+- id: sat_order
+  kind: satellite
+  source: ../data/orders.csv
+  attributes:
+  - name: order_hk
+    type: char(32)
+    role: surrogate_key
+    source: order_id
+  - name: load_dts
+    type: timestamp
+  - name: hashdiff
+    type: char(32)
+  - name: order_date
+    type: date
+  - name: status
+    type: varchar
+  - name: amount
+    type: double
+  - name: record_source
+    type: varchar
+relationships:
+- from: sat_customer.customer_hk
+  to: hub_customer.customer_hk
+- from: lnk_order_customer.order_hk
+  to: hub_order.order_hk
+- from: lnk_order_customer.customer_hk
+  to: hub_customer.customer_hk
+- from: sat_order.order_hk
+  to: hub_order.order_hk

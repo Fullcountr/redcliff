@@ -513,11 +513,11 @@ adjust it on the canvas, and the pipelines that load it are generated from it.
 
 - [x] **M1** Model spec (`model.yaml`, referenced by pipelines): import SQL DDL and DBML; export DDL,
   DBML, a Mermaid diagram and dbt `schema.yml` tests; a read-only diagram in the playground
-- [ ] **M2** Profile files (types, keys, foreign keys) and propose a Kimball model, with the reason
+- [x] **M2** Profile files (types, keys, foreign keys) and propose a Kimball model, with the reason
   for every proposal; a date dimension
-- [ ] **M3** Generate the loads: SCD2 dimensions by default (type-1 attributes, noise columns
+- [x] **M3** Generate the loads: SCD2 dimensions by default (type-1 attributes, noise columns
   ignored, Type 7 dual keys), facts with point-in-time key lookups and unknown members
-- [ ] **M4** Data Vault 2.0: hubs, links and satellites with MD5 hash keys, and Kimball marts over the vault
+- [x] **M4** Data Vault 2.0: hubs, links and satellites with MD5 hash keys, and Kimball marts over the vault
 - [ ] **M5** Lineage, OpenLineage, importers, MCP tools and the PR bot all speak the model
 
 ### Also next

@@ -33,7 +33,8 @@ VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 NODE_TYPES = ("source", "filter", "select", "derive", "join", "aggregate", "union", "sql", "target")
 FORMATS = ("csv", "parquet", "table")
 JOIN_TYPES = ("inner", "left", "right", "full")
-WRITE_MODES = ("overwrite", "append", "merge")
+WRITE_MODES = ("overwrite", "append", "merge", "scd1", "scd2", "insert_new", "insert_changed")
+KEYED_MODES = ("merge", "scd1", "scd2", "insert_new", "insert_changed")
 
 # (minimum inputs, maximum inputs or None for unlimited)
 INPUT_COUNTS: dict[str, tuple[int, int | None]] = {
@@ -227,21 +228,24 @@ def _check_io(issues: list[Issue], nid: str, params: dict, writing: bool) -> Non
         mode = params.get("mode", "overwrite")
         if mode not in WRITE_MODES:
             issues.append(Issue(nid, f"'mode' must be one of {list(WRITE_MODES)}"))
-        if mode == "merge":
+        if mode in KEYED_MODES:
             if fmt != "table":
-                issues.append(Issue(nid, "'mode: merge' needs a table target"))
+                issues.append(Issue(nid, f"'mode: {mode}' needs a table target"))
             keys = params.get("keys")
             if not isinstance(keys, list) or not keys:
-                issues.append(Issue(nid, "'mode: merge' needs 'keys': the columns that identify a row"))
+                issues.append(Issue(nid, f"'mode: {mode}' needs 'keys': the columns that identify a row"))
             else:
                 for k in keys:
                     _check_name(issues, nid, "key", k)
-            if params.get("delete_when") is not None:
-                _check_expr(issues, nid, "'delete_when'", params["delete_when"])
         else:
-            for key in ("keys", "delete_when"):
-                if key in params:
-                    issues.append(Issue(nid, f"'{key}' is only used with 'mode: merge'"))
+            if "keys" in params:
+                issues.append(Issue(nid, "'keys' is only used with a keyed mode (merge, scd1, scd2, insert_new, insert_changed)"))
+        if params.get("delete_when") is not None:
+            if mode != "merge":
+                issues.append(Issue(nid, "'delete_when' is only used with 'mode: merge'"))
+            else:
+                _check_expr(issues, nid, "'delete_when'", params["delete_when"])
+        _check_history(issues, nid, params, mode)
         for hook in ("pre_sql", "post_sql"):
             statements = params.get(hook)
             if statements is None:
@@ -264,6 +268,38 @@ def _check_io(issues: list[Issue], nid: str, params: dict, writing: bool) -> Non
                     _check_name(issues, nid, "column name", col)
                     if not isinstance(typ, str) or not typ.strip():
                         issues.append(Issue(nid, f"column {col!r} needs a type"))
+
+
+HISTORY_PARAMS = {
+    "surrogate_key": ("scd1", "scd2"), "unknown_member": ("scd1", "scd2"), "scd1": ("scd2",), "ignore": ("scd2",),
+    "as_of": ("scd2",), "compare": ("insert_changed",), "order_by": ("insert_changed",),
+}
+
+
+def _check_history(issues: list[Issue], nid: str, params: dict, mode: str) -> None:
+    """Parameters of the history modes: scd1, scd2, insert_new and insert_changed."""
+    for key, modes in HISTORY_PARAMS.items():
+        if key in params and mode not in modes:
+            issues.append(Issue(nid, f"'{key}' is only used with 'mode: {' or '.join(modes)}'"))
+    for key in ("surrogate_key", "compare", "order_by"):
+        if key in params:
+            _check_name(issues, nid, f"'{key}'", params[key])
+    for key in ("scd1", "ignore"):
+        if key in params:
+            names = params[key]
+            if not isinstance(names, list):
+                issues.append(Issue(nid, f"'{key}' must be a list of column names"))
+            else:
+                for n in names:
+                    _check_name(issues, nid, f"column in '{key}'", n)
+    if "unknown_member" in params and not isinstance(params["unknown_member"], bool):
+        issues.append(Issue(nid, "'unknown_member' is true or false"))
+    if params.get("as_of") is not None:
+        _check_expr(issues, nid, "'as_of'", params["as_of"])
+    if mode == "insert_changed" and not ("compare" in params and "order_by" in params):
+        issues.append(Issue(nid, "'mode: insert_changed' needs 'compare' (e.g. a hashdiff) and 'order_by' (e.g. a load time)"))
+    if params.get("unknown_member") and not params.get("surrogate_key"):
+        issues.append(Issue(nid, "'unknown_member' needs a 'surrogate_key' (it gets -1)"))
 
 
 def _check_sql_node(issues: list[Issue], node: Node) -> None:

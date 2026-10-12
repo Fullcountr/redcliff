@@ -119,6 +119,32 @@ insert unmatched ones):
 
 The incoming rows must have one row per key, as every engine's MERGE requires.
 
+## History targets
+
+Four more table modes keep history. The [data model](modeling.md) generates them, and you can
+write them by hand too. Each creates its table on the first run and needs `keys`:
+
+| Mode | Does | More params |
+| --- | --- | --- |
+| `scd1` | overwrites changed columns in place; inserts new keys | `surrogate_key` (generated when the input doesn't have it: max + row number), `unknown_member` |
+| `scd2` | keeps every version: closes a version when a tracked column changes (`valid_to`), inserts the new one; adds `valid_from`, `valid_to`, `is_current`; first versions are valid from 1900-01-01 so older facts find them | `scd1` (columns that overwrite every version), `ignore` (columns that don't make a version), `as_of` (the load time; default `CURRENT_TIMESTAMP`), `surrogate_key`, `unknown_member` (a row with key -1) |
+| `insert_new` | inserts rows whose keys aren't in the table (Data Vault hubs and links) | |
+| `insert_changed` | inserts a row when its `compare` column differs from the latest row for its keys (Data Vault satellites) | `compare` (e.g. `hashdiff`), `order_by` (e.g. `load_dts`) |
+
+```yaml
+- id: dim_customer
+  type: target
+  inputs: [stg_customer]
+  params: {format: table, table: dim_customer, mode: scd2, keys: [customer_id], surrogate_key: customer_key,
+           scd1: [first_name, last_name], ignore: [updated_at], as_of: "${load_ts}", unknown_member: true}
+```
+
+DuckDB and Spark SQL run them as `MERGE` and `INSERT` statements (Spark needs Delta Lake or
+Iceberg); PySpark runs the same statements through `spark.sql`. dbt gets a snapshot for `scd2`
+(check strategy, `valid_from`/`valid_to`, a 64-bit hash of the business key and tracked columns as
+the surrogate key; first versions start when the snapshot first runs) and incremental models for
+the others. Lakeflow gets the incoming rows as a view and a job note, as for `merge`.
+
 ## Variables
 
 `variables` declares values a pipeline can take per run. `${name}` anywhere in a node's params

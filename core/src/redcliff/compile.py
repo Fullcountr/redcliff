@@ -289,11 +289,114 @@ def _merge_statement(target: Node, dialect: str, blocks: list[str], columns: lis
     return head + "\n".join(lines)
 
 
+HISTORY_MODES = ("scd1", "scd2", "insert_new", "insert_changed")
+BEGINNING = "TIMESTAMP '1900-01-01 00:00:00'"  # first versions are valid from the start, so old facts find them
+
+
+def _history_statement(target: Node, dialect: str, blocks: list[str], columns: list[str] | None,
+                       relation: str | None = None) -> str:
+    """The statements for a history mode, in order. ``relation`` replaces the CTE chain (PySpark views).
+
+    - scd1: overwrite changed columns; insert new keys (with a surrogate key when asked)
+    - scd2: overwrite ``scd1`` columns on every version, refresh ``ignore`` columns on the current
+      one, close versions whose tracked columns changed, insert new versions; valid_from, valid_to
+      and is_current are added
+    - insert_new: insert rows whose keys aren't in the table (Data Vault hubs and links)
+    - insert_changed: insert rows whose ``compare`` column differs from the latest row for their
+      keys (Data Vault satellites, on a hashdiff)
+    The table is created on the first run, empty, with the incoming rows' columns.
+    """
+    p = target.params
+    mode = p["mode"]
+    if not columns:
+        raise CompileError(f"{target.id}: a {mode} target needs its input's columns; declare source columns")
+    keys = p["keys"]
+    missing = [k for k in keys if k not in columns]
+    if missing:
+        raise CompileError(f"{target.id}: keys {missing} aren't columns of {target.inputs[0]!r}")
+    q = lambda c: _transpile(_ident(c), dialect)  # noqa: E731
+    table = _table(target)
+    if relation is None:
+        src = _transpile(_ident(target.inputs[0]), dialect)
+        inner = f"{_with(blocks)}\nSELECT * FROM {src}" if blocks else f"SELECT * FROM {src}"
+        incoming = "(\n" + "\n".join("  " + line for line in inner.splitlines()) + "\n)"
+    else:
+        incoming = relation
+    on = " AND ".join(f"existing.{q(k)} = incoming.{q(k)}" for k in keys)
+    first = q(keys[0])
+    differ = lambda cols: " OR ".join(f"existing.{q(c)} IS DISTINCT FROM incoming.{q(c)}" for c in cols)  # noqa: E731
+    sets = lambda cols: ", ".join(f"{q(c)} = incoming.{q(c)}" for c in cols)  # noqa: E731
+    sk = p.get("surrogate_key")
+    make_sk = bool(sk) and sk not in columns
+    scd2 = mode == "scd2"
+    out = [f"-- {target.id}: target ({mode} on {', '.join(keys)})"]
+
+    extra_create = (f"CAST(NULL AS BIGINT) AS {q(sk)}, " if make_sk else "")
+    tail_create = (", CAST(NULL AS TIMESTAMP) AS valid_from, CAST(NULL AS TIMESTAMP) AS valid_to, "
+                   "CAST(NULL AS BOOLEAN) AS is_current") if scd2 else ""
+    out.append(f"CREATE TABLE IF NOT EXISTS {table} AS\nSELECT {extra_create}incoming.*{tail_create}\n"
+               f"FROM {incoming} AS incoming\nLIMIT 0")
+    if mode in ("insert_new", "insert_changed"):
+        cols = ", ".join(q(c) for c in columns)
+        if mode == "insert_new":
+            existing = f"(SELECT DISTINCT {', '.join(q(k) for k in keys)} FROM {table})"
+            where = f"existing.{first} IS NULL"
+        else:
+            cmp_, order = q(p["compare"]), q(p["order_by"])
+            part = ", ".join(q(k) for k in keys)
+            existing = (f"(\n  SELECT {part}, {cmp_} FROM (\n    SELECT {part}, {cmp_}, ROW_NUMBER() OVER "
+                        f"(PARTITION BY {part} ORDER BY {order} DESC) AS rn FROM {table}\n  ) AS ranked WHERE rn = 1\n)")
+            where = f"existing.{first} IS NULL OR existing.{cmp_} IS DISTINCT FROM incoming.{cmp_}"
+        out.append(f"INSERT INTO {table} ({cols})\nSELECT {', '.join(f'incoming.{q(c)}' for c in columns)}\n"
+                   f"FROM {incoming} AS incoming\nLEFT JOIN {existing} AS existing ON {on}\nWHERE {where}")
+        return ";\n\n".join([out[0] + "\n" + out[1]] + out[2:])
+
+    attrs = [c for c in columns if c not in keys and c != sk]
+    type1 = attrs if mode == "scd1" else [c for c in p.get("scd1") or [] if c in attrs]
+    ignore = [c for c in p.get("ignore") or [] if c in attrs] if scd2 else []
+    tracked = [c for c in attrs if c not in type1 and c not in ignore] if scd2 else []
+    if type1:
+        out.append(f"MERGE INTO {table} AS existing\nUSING {incoming} AS incoming\nON {on}\n"
+                   f"WHEN MATCHED AND ({differ(type1)}) THEN UPDATE SET {sets(type1)}")
+    if scd2 and (tracked or ignore):
+        as_of = _expr(p.get("as_of") or "CURRENT_TIMESTAMP", dialect)
+        whens = []
+        if tracked:
+            whens.append(f"WHEN MATCHED AND ({differ(tracked)}) THEN UPDATE SET valid_to = {as_of}, is_current = FALSE")
+        if ignore:
+            whens.append(f"WHEN MATCHED AND ({differ(ignore)}) THEN UPDATE SET {sets(ignore)}")
+        out.append(f"MERGE INTO {table} AS existing\nUSING {incoming} AS incoming\nON {on} AND existing.is_current\n"
+                   + "\n".join(whens))
+    names = ([q(sk)] if make_sk else []) + [q(c) for c in columns] + (["valid_from", "valid_to", "is_current"] if scd2 else [])
+    values = ([f"COALESCE(mx.m, 0) + ROW_NUMBER() OVER (ORDER BY {', '.join(f'incoming.{q(k)}' for k in keys)})"]
+              if make_sk else []) + [f"incoming.{q(c)}" for c in columns]
+    joins = [f"LEFT JOIN (SELECT {', '.join(q(k) for k in keys)} FROM {table}"
+             + (" WHERE is_current" if scd2 else "") + f") AS existing ON {on}"]
+    if scd2:
+        as_of = _expr(p.get("as_of") or "CURRENT_TIMESTAMP", dialect)
+        seen_on = " AND ".join(f"seen.{q(k)} = incoming.{q(k)}" for k in keys)
+        joins.append(f"LEFT JOIN (SELECT DISTINCT {', '.join(q(k) for k in keys)} FROM {table}) AS seen ON {seen_on}")
+        values += [f"CASE WHEN seen.{first} IS NULL THEN {BEGINNING} ELSE {as_of} END", "CAST(NULL AS TIMESTAMP)", "TRUE"]
+    if make_sk:
+        joins.append(f"CROSS JOIN (SELECT MAX({q(sk)}) AS m FROM {table}) AS mx")
+    out.append(f"INSERT INTO {table} ({', '.join(names)})\nSELECT {', '.join(values)}\nFROM {incoming} AS incoming\n"
+               + "\n".join(joins) + f"\nWHERE existing.{first} IS NULL")
+    if sk and p.get("unknown_member"):
+        u_names = [q(sk)] + (["valid_from", "valid_to", "is_current"] if scd2 else [])
+        u_values = ["-1"] + ([BEGINNING, "CAST(NULL AS TIMESTAMP)", "TRUE"] if scd2 else [])
+        out.append(f"-- {target.id}: the unknown member, for facts whose key isn't in the dimension\n"
+                   f"INSERT INTO {table} ({', '.join(u_names)})\nSELECT {', '.join(u_values)}\n"
+                   f"WHERE NOT EXISTS (SELECT 1 FROM {table} WHERE {q(sk)} = -1)")
+    return ";\n\n".join([out[0] + "\n" + out[1]] + out[2:])
+
+
 def _write_statement(target: Node, dialect: str, base_dir, blocks: list[str],
                      columns: list[str] | None = None) -> str:
     p = target.params
     if p.get("mode") == "merge":
         return _merge_statement(target, dialect, blocks, columns)
+    if p.get("mode") in HISTORY_MODES:
+        return _history_statement(target, dialect, blocks, columns)
     src = _transpile(_ident(target.inputs[0]), dialect)
     query = f"SELECT * FROM {src}"
     mode = p.get("mode", "overwrite")
@@ -420,6 +523,14 @@ def compile_pyspark(pipeline: Pipeline, base_dir=None) -> str:
             writer = f'{ins[0]}.write.mode({p.get("mode", "overwrite")!r})'
             if p.get("mode") == "merge":
                 lines += _pyspark_merge(node, ins[0])
+            elif p.get("mode") in HISTORY_MODES:
+                view = f"{node.id}_incoming"
+                lines.append(f"{ins[0]}.createOrReplaceTempView({view!r})")
+                lines.append(f"# {node.id}: {p['mode']}; Spark runs MERGE on tables with row-level updates (Delta, Iceberg)")
+                text = _history_statement(node, "spark", [], cols.get(node.inputs[0]), relation=view)
+                for statement in text.split(";\n\n"):
+                    body = "\n".join(line for line in statement.splitlines() if not line.startswith("--"))
+                    lines.append(f"spark.sql({body!r})")
             elif p["format"] == "table":
                 lines.append(f"{writer}.saveAsTable({p['table']!r})")
             else:

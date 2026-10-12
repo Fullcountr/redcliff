@@ -63,7 +63,7 @@ def test_validation():
 
     assert any("needs 'keys'" in i for i in issues(format="table", table="t", mode="merge"))
     assert any("needs a table target" in i for i in issues(format="csv", path="x.csv", mode="merge", keys=["region"]))
-    assert any("'keys' is only used with 'mode: merge'" in i for i in issues(format="table", table="t", keys=["region"]))
+    assert any("'keys' is only used with a keyed mode" in i for i in issues(format="table", table="t", keys=["region"]))
     graph = build_graph(merging(keys=["regoin"]))
     assert any("regoin" in str(i) for i in graph.issues)
     with pytest.raises(CompileError, match="aren't columns"):

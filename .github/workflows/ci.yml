@@ -51,7 +51,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]" "dbt-duckdb>=1.9"
-      - run: pytest tests/test_dbt.py -v
+      - run: pytest tests/test_dbt.py tests/test_generate.py -v
 
   web:
     runs-on: ubuntu-latest

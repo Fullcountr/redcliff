@@ -185,7 +185,7 @@ def build_graph(pipeline: Pipeline) -> ColumnGraph:
                 for use in analyze_expression(p["condition"]):
                     for src in _resolve(use, node, cols, issues):
                         graph.dataset_edges.append(DatasetEdge(src, nid, "FILTER"))
-            elif p.get("mode") == "merge":
+            elif p.get("mode") in ("merge", "scd1", "scd2", "insert_new", "insert_changed"):
                 inp = node.inputs[0]
                 for k in p.get("keys") or []:
                     if _name_check(node, k, inp, cols, issues):

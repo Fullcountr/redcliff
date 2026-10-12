@@ -109,7 +109,15 @@ def compile_lakeflow(pipeline: Pipeline, base_dir: str | Path | None = None,
                       f"def {fn}() -> DataFrame:", f'    """{node.id}: source"""', f"    return {body}"]
         elif t == "target":
             src = read(node.inputs[0])
-            if p.get("mode") == "merge":
+            if p.get("mode") in ("scd1", "scd2", "insert_new", "insert_changed"):
+                table = f"{p['table'].split('.')[-1]}_incoming"
+                what = {"scd1": "overwrite (SCD1)", "scd2": "keep history of (SCD2)", "insert_new": "insert new keys into",
+                        "insert_changed": "insert changed rows into"}[p["mode"]]
+                comment = (f"the rows to {what} {p['table']}; a declarative pipeline recomputes datasets, so the load "
+                           "runs as a job task")
+                job_notes.append(f"{node.id}: after the pipeline, {what} {p['table']} from {table} on "
+                                 f"{', '.join(p['keys'])} (redcliff compile --dialect spark prints the statements)")
+            elif p.get("mode") == "merge":
                 table = f"{p['table'].split('.')[-1]}_incoming"
                 comment = (f"the rows to merge into {p['table']} on {', '.join(p['keys'])}; a declarative pipeline "
                            "recomputes datasets, so the MERGE itself runs as a job task")

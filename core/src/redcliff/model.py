@@ -38,11 +38,12 @@ class Attribute:
     history: str | None = None  # dimension attributes: scd1 overwrites every version
     track: bool = True  # dimension attributes: false = a change doesn't make a new version
     description: str | None = None
+    source: str | None = None  # SQL over the entity's source columns; default: the column of the same name
 
     @classmethod
     def from_dict(cls, d: dict) -> Attribute:
         return cls(name=d.get("name"), type=d.get("type"), role=d.get("role"), history=d.get("history"),
-                   track=d.get("track", True), description=d.get("description"))
+                   track=d.get("track", True), description=d.get("description"), source=d.get("source"))
 
     def to_dict(self) -> dict:
         out: dict[str, Any] = {"name": self.name, "type": self.type}
@@ -54,6 +55,8 @@ class Attribute:
             out["track"] = self.track
         if self.description:
             out["description"] = self.description
+        if self.source:
+            out["source"] = self.source
         return out
 
 
@@ -65,16 +68,17 @@ class Entity:
     description: str | None = None
     grain: str | None = None  # facts: what one row is
     history: str | None = None  # dimensions: scd2 (default) or scd1
+    source: str | None = None  # where its rows come from: a file path (relative to the model) or a table
 
     @classmethod
     def from_dict(cls, d: dict) -> Entity:
         return cls(id=d.get("id"), kind=d.get("kind", "table"), description=d.get("description"),
-                   grain=d.get("grain"), history=d.get("history"),
+                   grain=d.get("grain"), history=d.get("history"), source=d.get("source"),
                    attributes=[Attribute.from_dict(a) for a in d.get("attributes") or [] if isinstance(a, dict)])
 
     def to_dict(self) -> dict:
         out: dict[str, Any] = {"id": self.id, "kind": self.kind}
-        for key in ("description", "grain", "history"):
+        for key in ("description", "grain", "history", "source"):
             if getattr(self, key):
                 out[key] = getattr(self, key)
         out["attributes"] = [a.to_dict() for a in self.attributes]
@@ -199,6 +203,21 @@ def _family(type_name: str) -> str:
     return t.this.name.lower()
 
 
+def _check_source_sql(issues: list[Issue], entity_id: str, a: Attribute) -> None:
+    from redcliff.spec import file_reads
+
+    if not isinstance(a.source, str) or not a.source.strip():
+        issues.append(Issue(entity_id, f"{a.name}: 'source' must be a SQL expression"))
+        return
+    try:
+        tree = sqlglot.parse_one(a.source)
+    except ParseError:
+        issues.append(Issue(entity_id, f"{a.name}: 'source' is not valid SQL ({a.source!r})"))
+        return
+    if file_reads(tree):
+        issues.append(Issue(entity_id, f"{a.name}: 'source' reads {file_reads(tree)[0]!r}; use the entity's source"))
+
+
 def validate_model(model: Model) -> list[Issue]:
     """Every problem in the model. An empty list means it's valid."""
     issues: list[Issue] = []
@@ -244,6 +263,8 @@ def validate_model(model: Model) -> list[Issue]:
                                           f"{list(HISTORY)}"))
             if a.track is not True and (e.kind != "dimension" or a.track is not False):
                 issues.append(Issue(e.id, f"{a.name}: 'track: false' applies to dimension attributes"))
+            if a.source is not None:
+                _check_source_sql(issues, e.id, a)
             if a.role in KEY_ROLES and (a.history or a.track is not True):
                 issues.append(Issue(e.id, f"{a.name}: a key isn't tracked or overwritten; drop 'history'/'track'"))
         if sum(a.role == "surrogate_key" for a in e.attributes) > 1:

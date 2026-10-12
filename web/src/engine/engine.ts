@@ -57,6 +57,15 @@ export const engine = {
   modelAnalyze: (model: DataModel) => call<ModelAnalysis>("model_analyze", JSON.stringify(model)),
   modelExport: (model: DataModel, fmt: ModelExport, dialect?: string) =>
     call<{ code: string }>("model_export", JSON.stringify(model), fmt, dialect ?? null),
+  modelProfileQueries: (tables: Record<string, Record<string, string>>) =>
+    call<{ queries: Record<string, string> }>("model_profile_queries", JSON.stringify(tables)),
+  modelReferenceQueries: (tables: Record<string, Record<string, string>>, rows: Record<string, unknown[]>) =>
+    call<{ checks: { ref: [string, string, string, string]; sql: string }[] }>(
+      "model_reference_queries", JSON.stringify(tables), JSON.stringify(rows)),
+  modelPropose: (tables: Record<string, Record<string, string>>, rows: Record<string, unknown[]>, held: string[][], name: string) =>
+    call<{ model: DataModel; reasons: Record<string, string[]> }>(
+      "model_propose", JSON.stringify(tables), JSON.stringify(rows), JSON.stringify(held), name),
+  modelLoadPipeline: (model: DataModel) => call<{ spec: Spec; targets: string[] }>("model_load_pipeline", JSON.stringify(model)),
   modelImport: (text: string, fmt: "ddl" | "dbml", dialect: string | null, name: string) =>
     call<{ model: DataModel; warnings: string[] }>("model_import", text, fmt, dialect, name),
 };

@@ -451,8 +451,10 @@ export default function App() {
   return (
     <div className="app">
       {view === "model" && dataModel && (
-        <ModelView model={dataModel} engineReady={ready} tab={modelTab} onTab={setModelTab}
-          onChange={(m, note) => { setDataModel(m); if (note) say(note); }} />
+        <ModelView model={dataModel} engineReady={ready} dataReady={dataReady} tab={modelTab} onTab={setModelTab}
+          onChange={(m, note) => { setDataModel(m); if (note) say(note); }}
+          onOpenPipeline={(s) => { setView("pipeline"); setExample(""); replaceSpec(s, false); setNotes([]); setScorecard(null);
+            setSelectedId(null); say(`Opened ${s.name}: the load generated from the model`); }} />
       )}
       {view === "pipeline" && <main
         className="canvas"
@@ -582,7 +584,7 @@ export default function App() {
                 <MenuItem icon={Boxes} title="SSIS package" sub=".dtsx data flows, with a migration scorecard"
                   onClick={() => { close(); setView("pipeline"); setImporting({ mode: "ssis", busy: false, error: null }); }} />
                 <div className="menu-sep" />
-                <MenuItem icon={Layers} title="Data model" sub="CREATE TABLE statements or DBML"
+                <MenuItem icon={Layers} title="Data model" sub="Propose one from your data, or paste DDL or DBML"
                   onClick={() => { close(); openModel(null, "import"); }} />
               </>
             )}

@@ -62,7 +62,7 @@ const modelsDir = join(repo, "examples", "models");
 const models = {};
 for (const f of readdirSync(modelsDir).filter((f) => f.endsWith(".yaml"))) {
   const model = yaml.load(readFileSync(join(modelsDir, f), "utf8"));
-  models[model.name] = model;
+  if (Array.isArray(model?.entities)) models[model.name] = model; // skip the generated load pipelines
 }
 const legacy = readFileSync(join(repo, "examples", "legacy", "teradata_revenue.sql"), "utf8");
 const pcDir = join(repo, "examples", "legacy", "powercenter");

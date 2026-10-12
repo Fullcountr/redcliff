@@ -96,9 +96,13 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
         else:
             model_name[n.id] = f"int_{n.id}"
 
+    written = {n.params["table"]: n.id for n in pipeline.nodes if n.type == "target" and n.params.get("format") == "table"}
+
     def relation(node_id: str) -> str:
         node = by_id[node_id]
         if node.type == "source" and node.params["format"] == "table":
+            if node.params["table"] in written:  # this pipeline writes it: ref() it, so dbt builds it first
+                return f"{{{{ ref('{model_name[written[node.params['table']]]}') }}}}"
             return f"{{{{ source('{SOURCE_GROUP}', '{_table_name(node.params['table'])[1]}') }}}}"
         return f"{{{{ ref('{model_name[node_id]}') }}}}"
 
@@ -131,6 +135,8 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
         "model-paths: [models]",
         "seed-paths: [seeds]",
         "test-paths: [tests]",
+        *(["snapshot-paths: [snapshots]"] if any(n.type == "target" and n.params.get("mode") == "scd2"
+                                                 for n in pipeline.nodes) else []),
         "models:",
         f"  {project}:",
         "    +materialized: ephemeral  # steps compile into their targets' queries",
@@ -203,7 +209,24 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
         else:
             p = node.params
             config: list[str] = []
-            if p.get("mode") == "merge":
+            mode = p.get("mode")
+            if mode == "scd2":
+                files[f"snapshots/{model_name[node.id]}.sql"] = _snapshot(node, model_name[node.id], relation(node.inputs[0]),
+                                                                          cols.get(node.inputs[0]) or [], adapter)
+                continue
+            history_note = ""
+            if mode in ("scd1", "insert_new", "insert_changed"):
+                keys = list(p["keys"])
+                if mode == "scd1":
+                    strategy = "merge" if adapter in ("databricks", "spark", "snowflake", "bigquery") else "delete+insert"
+                    config += ["materialized='incremental'", f"unique_key={keys!r}", f"incremental_strategy='{strategy}'"]
+                    sk = p.get("surrogate_key")
+                    if sk and sk not in (cols.get(node.inputs[0]) or []):
+                        history_note = (f"-- Redcliff generates {sk}; dbt keys these rows by {', '.join(keys)} instead "
+                                        "(add a surrogate key with dbt_utils.generate_surrogate_key if you need one).\n")
+                else:
+                    config += ["materialized='incremental'", "incremental_strategy='append'"]
+            elif mode == "merge":
                 strategy = "merge" if adapter in ("databricks", "spark", "snowflake", "bigquery") else "delete+insert"
                 config += ["materialized='incremental'", f"unique_key={list(p['keys'])!r}",
                            f"incremental_strategy='{strategy}'"]
@@ -229,6 +252,9 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
                 f"-- Redcliff writes {_jinja_literal(_one_line(p['path']))}; dbt materializes a table here. " \
                 "Unload it with your platform's tools.\n"
             body = f"SELECT * FROM {relation(node.inputs[0])}\n"
+            note += history_note
+            if mode in ("insert_new", "insert_changed"):
+                body = f"SELECT * FROM {relation(node.inputs[0])} AS incoming\n" + _insert_filter(p)
             if p.get("mode") == "merge" and p.get("delete_when"):
                 cond = _jinja_literal(sqlglot.parse_one(p["delete_when"]).sql(dialect))
                 note += (f"-- Redcliff deletes matched rows where {cond}; dbt's incremental merge doesn't delete,\n"
@@ -262,6 +288,62 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
         files = {path: token.sub(lambda m: f'{{{{ var("{by_lower.get(m.group(1).lower(), m.group(1))}") }}}}', text)
                  for path, text in files.items()}
     return files
+
+
+_HASH64 = {  # a 64-bit integer hash of a row's text, per adapter
+    "duckdb": "CAST(hash({x}) % 9223372036854775807 AS BIGINT)",
+    "databricks": "xxhash64({x})", "spark": "xxhash64({x})",
+    "snowflake": "HASH({x})",
+    "bigquery": "FARM_FINGERPRINT({x})",
+    "postgres": "('x' || SUBSTR(MD5({x}), 1, 15))::BIT(60)::BIGINT",
+    "redshift": "STRTOL(SUBSTRING(MD5({x}), 1, 15), 16)",
+}
+
+
+def _snapshot(node: Node, name: str, rel: str, columns: list[str], adapter: str = "duckdb") -> str:
+    """An SCD2 target as a dbt snapshot (dbt 1.9+): check strategy on the tracked columns.
+
+    The surrogate key is a 64-bit hash of the business key and the tracked columns: one value per
+    version, which the facts look up like Redcliff's own."""
+    p = node.params
+    keys = list(p["keys"])
+    sk = p.get("surrogate_key")
+    skip = set(keys) | set(p.get("scd1") or []) | set(p.get("ignore") or []) | {sk}
+    tracked = [c for c in columns if c not in skip]
+    unique = keys[0] if len(keys) == 1 else keys
+    lost = [what for what, on in (("type-1 overwrites", p.get("scd1")), ("the unknown member", p.get("unknown_member")))
+            if on]
+    select = "*"
+    if sk and sk not in columns:
+        text = " || '||' || ".join(f"COALESCE(CAST({c} AS VARCHAR), '')" for c in keys + tracked)
+        hashed = _HASH64.get(adapter)
+        select = f"{hashed.format(x=text)} AS {sk}, *" if hashed else "*"
+        if not hashed:
+            lost.append(f"the surrogate key {sk} (no 64-bit hash for {adapter}; dbt_scd_id identifies a version)")
+    note = ("-- dbt keeps the history: a change to a tracked column closes the version (valid_to) and adds one.\n"
+            + (f"-- Not in a dbt snapshot: {', '.join(lost)}.\n" if lost else "")
+            + "-- First versions start when the snapshot first runs, not at the beginning of time.\n")
+    config = (f"target_schema=target.schema, unique_key={unique!r}, strategy='check', check_cols={tracked!r}, "
+              "snapshot_meta_column_names={'dbt_valid_from': 'valid_from', 'dbt_valid_to': 'valid_to'}")
+    return (f"-- {node.id}: target (SCD2)\n{note}{{% snapshot {name} %}}\n{{{{ config({config}) }}}}\n\n"
+            f"SELECT {select} FROM {rel}\n{{% endsnapshot %}}\n")
+
+
+def _insert_filter(p: dict) -> str:
+    """Incremental runs insert only new keys (insert_new) or rows that changed since the latest (insert_changed)."""
+    keys = list(p["keys"])
+    on = " AND ".join(f"existing.{k} = incoming.{k}" for k in keys)
+    if p["mode"] == "insert_new":
+        existing = "{{ this }} AS existing"
+        cond = on
+    else:
+        part = ", ".join(keys)
+        existing = (f"(SELECT {part}, {p['compare']}, ROW_NUMBER() OVER (PARTITION BY {part} ORDER BY {p['order_by']} DESC) "
+                    "AS rn FROM {{ this }}) AS existing")
+        cond = f"existing.rn = 1 AND {on} AND existing.{p['compare']} = incoming.{p['compare']}"
+    return ("{% if is_incremental() %}\n"
+            f"WHERE NOT EXISTS (SELECT 1 FROM {existing} WHERE {cond})\n"
+            "{% endif %}\n")
 
 
 def project_path(out_dir: str | Path, rel: str) -> Path:

@@ -102,6 +102,12 @@
           "items": {
             "$ref": "#/$defs/attribute"
           }
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^\\n\\r]+$",
+          "description": "Where the entity's rows come from: a CSV or Parquet path (relative to the model file) or a table."
         }
       },
       "if": {
@@ -159,6 +165,11 @@
         },
         "description": {
           "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "SQL over the entity source's columns. Default: the column of the same name."
         }
       }
     }

@@ -224,3 +224,50 @@ def model_import(text: str, fmt: str, dialect: str | None = None, name: str = "i
 
     result = from_dbml(text, name) if fmt == "dbml" else from_ddl(text, dialect or None, name)
     return {"model": result.model.to_dict(), "warnings": result.warnings}
+
+
+@_wrap
+def model_profile_queries(tables: Any) -> dict[str, Any]:
+    """Profiling SQL for each browser table: {table: {column: type}} -> {table: sql}."""
+    from redcliff.propose import profile_query
+
+    tables = json.loads(tables) if isinstance(tables, str) else tables
+    return {"queries": {t: profile_query(f'"{t}"', list(cols)) for t, cols in tables.items()}}
+
+
+def _profiles(tables: Any, rows: Any, files: Any):
+    from redcliff.propose import read_profile
+
+    tables = json.loads(tables) if isinstance(tables, str) else tables
+    rows = json.loads(rows) if isinstance(rows, str) else rows
+    files = json.loads(files) if isinstance(files, str) else (files or {})
+    return [read_profile(t, files.get(t, f"{t}.csv"), cols, rows[t]) for t, cols in tables.items() if t in rows]
+
+
+@_wrap
+def model_reference_queries(tables: Any, rows: Any, files: Any = None) -> dict[str, Any]:
+    """The foreign keys worth testing, each with the SQL that counts its missing values."""
+    from redcliff.propose import candidate_references, inclusion_query
+
+    refs = candidate_references(_profiles(tables, rows, files))
+    return {"checks": [{"ref": list(r), "sql": inclusion_query(f'"{r[0]}"', r[1], f'"{r[2]}"', r[3])} for r in refs]}
+
+
+@_wrap
+def model_propose(tables: Any, rows: Any, held: Any, name: str = "proposed", files: Any = None) -> dict[str, Any]:
+    """A Kimball model from the profiles and the foreign keys that held, with the reason for each choice."""
+    from redcliff.propose import propose_model
+
+    held = json.loads(held) if isinstance(held, str) else held
+    proposal = propose_model(_profiles(tables, rows, files), [tuple(r) for r in held], name=name)
+    return proposal.to_dict()
+
+
+@_wrap
+def model_load_pipeline(model: Any) -> dict[str, Any]:
+    """The pipeline that loads a model (Kimball: SCD2 dimensions and point-in-time facts; Data Vault:
+    hubs, links, satellites and current-state marts)."""
+    from redcliff.generate import model_pipeline
+
+    pipeline = model_pipeline(_model(model))
+    return {"spec": pipeline.to_dict(), "targets": [n.id for n in pipeline.nodes if n.type == "target"]}
