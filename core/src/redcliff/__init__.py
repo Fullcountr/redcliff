@@ -9,7 +9,7 @@ from redcliff.scorecard import Scorecard, ScoreItem
 from redcliff.ssis import SSISImportError, import_ssis
 from redcliff.spec import Issue, Node, Pipeline, SpecError, json_schema, load_spec, parse_spec, validate
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "CompileError",

@@ -79,8 +79,9 @@ jobs:
 Every pull request that touches a spec gets one comment, updated in place on each push, and the
 same report in the job summary.
 
-`@main` follows the latest code; pin a release, such as `Fullcountr/redcliff@v0.1.0`, to keep the
-report stable.
+`@main` follows the latest code; pin a release, such as `Fullcountr/redcliff@v0.1.1`, to keep the
+report stable. Use 0.1.1 or later: earlier releases lack the security fixes in
+[#2](https://github.com/Fullcountr/redcliff/pull/2).
 
 | Input | Default | Does |
 | --- | --- | --- |
