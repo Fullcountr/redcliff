@@ -119,3 +119,18 @@ def test_project_shape_for_a_powercenter_import():
     docs = yaml.safe_load(files["models/schema.yml"])
     revenue = next(m for m in docs["models"] if m["name"] == "region_monthly_revenue")
     assert {"name": "revenue", "description": "From orders.amount (aggregation)."} in revenue["columns"]
+
+
+def test_a_failing_expectation_fails_dbt_build(tmp_path, monkeypatch):
+    data = example("orders_revenue").to_dict()
+    agg = next(n for n in data["nodes"] if n["id"] == "revenue_by_region")
+    agg["expect"] = [{"row_count": {"min": 5}}, {"condition": "revenue > 250", "severity": "warn"}]
+    files = compile_dbt(Pipeline.from_dict(data), "duckdb", SPECS)
+    project = tmp_path / "project"
+    write_dbt_project(files, project)
+    monkeypatch.chdir(project)
+    result = dbtRunner().invoke(["build", "--project-dir", str(project), "--profiles-dir", str(project), "--quiet"])
+    statuses = {r.node.name: str(r.status) for r in result.result or []}
+    assert not result.success
+    assert statuses["revenue_by_region__row_count"] == "fail"
+    assert statuses["revenue_by_region__condition_revenue_250"] == "warn"

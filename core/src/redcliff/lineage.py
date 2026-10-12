@@ -172,6 +172,8 @@ def build_graph(pipeline: Pipeline) -> ColumnGraph:
             if nid not in cols and nid not in unknown_reported:
                 issues.append(Issue(nid, "declare 'columns' on this source to get lineage through it"))
                 unknown_reported.add(nid)
+            if node.expect is not None:
+                _expectation_checks(node, cols, issues)
             continue
         if any(i not in cols for i in node.inputs):
             continue  # upstream columns unknown; already reported at the source
@@ -230,7 +232,10 @@ def build_graph(pipeline: Pipeline) -> ColumnGraph:
         elif t == "sql":
             _sql_node_edges(graph, node, issues)
 
-        elif t == "union":
+        if node.expect is not None:
+            _expectation_checks(node, cols, issues)
+
+        if t == "union":
             first = cols[node.inputs[0]]
             for other in node.inputs[1:]:
                 if len(cols[other]) != len(first):
@@ -241,6 +246,21 @@ def build_graph(pipeline: Pipeline) -> ColumnGraph:
                     if pos < len(cols[inp]):
                         edge(Ref(inp, cols[inp][pos]), Ref(nid, c), DIRECT, "IDENTITY", False)
     return graph
+
+
+def _expectation_checks(node: Node, cols: dict[str, list[str]], issues: list[Issue]) -> None:
+    """Expectations may only name columns the step has."""
+    from redcliff.expect import parse_expectations
+
+    have = cols.get(node.inputs[0] if node.type == "target" else node.id)
+    if have is None:
+        return
+    for e in parse_expectations(node.id, node.expect)[0]:
+        named = set(e.columns)
+        if e.condition:
+            named |= {u.column for u in analyze_expression(e.condition) if u.column}
+        for c in sorted(named - set(have)):
+            issues.append(Issue(node.id, f"expectation {e.name!r} names {c!r}, which isn't a column here"))
 
 
 def _sql_node_edges(graph: ColumnGraph, node: Node, issues: list[Issue]) -> None:

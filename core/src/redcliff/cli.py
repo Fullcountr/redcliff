@@ -7,6 +7,7 @@
     redcliff compile pipeline.yaml --to dbt -o my_dbt_project       (or --to lakeflow)
     redcliff lineage pipeline.yaml --impact orders.status
     redcliff run pipeline.yaml --db warehouse.duckdb
+    redcliff test pipeline.yaml                       (data quality expectations)
     redcliff trace pipeline.yaml out --where "region = 'South'"
     redcliff diff old.yaml new.yaml --data            (or: redcliff diff --git origin/main)
     redcliff mcp --root .                             (an MCP server for AI agents, over stdio)
@@ -192,12 +193,58 @@ def cmd_run(args) -> int:
         for row in rel.fetchmany(args.limit):
             print(" | ".join("" if v is None else str(v) for v in row))
         return 0
+    if not args.skip_checks:
+        from redcliff.expect import run_checks
+
+        results = run_checks(con, pipeline, base_dir=base)
+        _report_checks(results, quiet=True)
+        if any(not r.passed and r.expectation.severity == "error" for r in results):
+            _err("not writing: an expectation failed (see above); fix the data or pass --skip-checks")
+            return 1
     for target in (n for n in pipeline.nodes if n.type == "target" and n.params["format"] != "table"):
         (base / target.params["path"]).parent.mkdir(parents=True, exist_ok=True)
     con.execute(compile_script(pipeline, "duckdb", base_dir=base))
     targets = [n.params.get("table") or n.params.get("path") for n in pipeline.nodes if n.type == "target"]
     print(f"ran {pipeline.name}: wrote {', '.join(targets)}")
     return 0
+
+
+def _report_checks(results, quiet: bool = False) -> None:
+    """Print expectation results; with quiet, only the failures."""
+    for r in results:
+        e = r.expectation
+        if r.passed:
+            if not quiet:
+                print(f"pass  {e.node}.{e.name}  ({e.describe()})")
+            continue
+        label = "warn " if e.severity == "warn" else "FAIL "
+        what = r.error or f"{r.failures} failing row{'s' if r.failures != 1 else ''}"
+        print(f"{label} {e.node}.{e.name}  ({e.describe()}): {what}")
+        if r.sample:
+            print("        " + " | ".join(r.columns))
+            for row in r.sample:
+                print("        " + " | ".join("" if v is None else str(v) for v in row))
+
+
+def cmd_test(args) -> int:
+    try:
+        import duckdb
+    except ImportError:
+        _err("test needs DuckDB: pip install duckdb")
+        return 2
+    from redcliff.expect import run_checks
+
+    pipeline = _spec(args)
+    con = duckdb.connect(args.db, read_only=True) if args.db else duckdb.connect()
+    results = run_checks(con, pipeline, args.node, Path(args.spec).parent)
+    if not results:
+        print("no expectations to check; add 'expect' to a step (see docs/spec.md)")
+        return 0
+    _report_checks(results)
+    failed = [r for r in results if not r.passed and r.expectation.severity == "error"]
+    warned = [r for r in results if not r.passed and r.expectation.severity == "warn"]
+    print(f"\n{len(results) - len(failed) - len(warned)} passed, {len(failed)} failed, {len(warned)} warned")
+    return 1 if failed else 0
 
 
 def _cell(v) -> str:
@@ -399,7 +446,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", help="DuckDB database file holding table sources and targets")
     p.add_argument("--node", help="preview one node's rows instead of writing targets")
     p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--skip-checks", action="store_true", help="write even if an expectation fails")
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("test", help="run the pipeline's expectations (data quality checks) in DuckDB")
+    p.add_argument("spec")
+    p.add_argument("--var", action="append", metavar="NAME=VALUE", help="set a pipeline variable (repeatable)")
+    p.add_argument("--node", help="check only this step")
+    p.add_argument("--db", help="DuckDB database file holding table sources")
+    p.set_defaults(func=cmd_test)
 
     p = sub.add_parser("trace", help="row-level trace: the source rows behind a step's rows")
     p.add_argument("spec")

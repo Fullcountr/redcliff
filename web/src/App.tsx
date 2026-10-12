@@ -16,7 +16,7 @@ import { layout } from "./layout";
 import { fromImpact, trace, type Highlight } from "./lineage";
 import {
   defaultParams, refParts, type Analysis, type Impact, type ImportResult, type Scorecard, type ScoreStatus,
-  type Spec, type Step, type StepType,
+  type Spec, type Step, type StepType, tally, type CheckRun,
 } from "./model";
 import { shareLink, specFromHash } from "./share";
 import { BrandMark, Menu, MenuItem, useTheme, type Theme } from "./ui";
@@ -68,6 +68,7 @@ export default function App() {
   const [pinned, setPinned] = useState<string | null>(null);
   const [impact, setImpact] = useState<Impact | null>(null);
   const [counts, setCounts] = useState<Record<string, number | null>>({});
+  const [checkRuns, setCheckRuns] = useState<CheckRun[]>([]);
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
   const [notes, setNotes] = useState<string[]>([]);
   const [scorecard, setScorecard] = useState<Scorecard | null>(null);
@@ -154,6 +155,29 @@ export default function App() {
     })();
     return () => { live = false; };
   }, [analysis, spec, runnable, fresh]);
+
+  // Data quality expectations, run in DuckDB once the data is there.
+  useEffect(() => {
+    if (!runnable || !spec || !analysis?.valid || !spec.nodes.some((n) => n.expect?.length)) { setCheckRuns([]); return; }
+    let live = true;
+    (async () => {
+      const q = await engine.checks(spec);
+      if (!q.ok) return;
+      const runs: CheckRun[] = [];
+      for (const c of q.checks) {
+        try {
+          const failures = await data.count(c.sql);
+          const sample = failures ? await data.query(c.sql, 5) : { columns: [], rows: [] };
+          runs.push({ ...c, failures, columns: sample.columns, sample: sample.rows });
+        } catch (e) {
+          runs.push({ ...c, failures: null, columns: [], sample: [], error: String(e).replace(/^Error: /, "") });
+        }
+        if (!live) return;
+      }
+      setCheckRuns(runs);
+    })();
+    return () => { live = false; };
+  }, [analysis, spec, runnable]);
 
   // ---------------------------------------------------------------- layout
   const autoPositions = useMemo(() => (spec ? layout(spec, analysis?.columns ?? {}) : {}), [spec, analysis]);
@@ -282,6 +306,7 @@ export default function App() {
         step,
         columns: analysis?.columns[step.id] ?? [],
         rowCount: counts[step.id],
+        checks: step.expect?.length ? tally(checkRuns.filter((r) => r.node === step.id)) : null,
         issues: issuesByNode[step.id] ?? [],
         highlight,
         selected: step.id === selectedId,
@@ -291,7 +316,7 @@ export default function App() {
         onPinColumn: (ref: string) => setPinned((p) => (p === ref ? null : ref)),
       },
     }));
-  }, [spec, analysis, counts, positions, autoPositions, selectedId, highlight, scoreByNode, activeNodes]);
+  }, [spec, analysis, counts, checkRuns, positions, autoPositions, selectedId, highlight, scoreByNode, activeNodes]);
 
   // React Flow hides a node until it is measured, so keep each node's measurements across
   // re-renders (hovering a column re-renders every card) instead of handing it fresh objects.
@@ -547,6 +572,7 @@ export default function App() {
           notes={notes}
           ready={runnable}
           engineReady={ready}
+          checkRuns={checkRuns}
           scorecard={scorecard}
           activeItem={activeItem}
           onPickItem={setActiveItem}

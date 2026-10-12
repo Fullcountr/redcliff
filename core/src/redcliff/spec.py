@@ -52,6 +52,7 @@ class Node:
     type: str
     inputs: list[str] = field(default_factory=list)
     params: dict[str, Any] = field(default_factory=dict)
+    expect: Any = None  # data quality checks on this step's rows; see redcliff.expect
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Node:
@@ -60,6 +61,7 @@ class Node:
             type=data.get("type", ""),
             inputs=list(data.get("inputs") or []),
             params=dict(data.get("params") or {}),
+            expect=data.get("expect"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -68,6 +70,8 @@ class Node:
             out["inputs"] = list(self.inputs)
         if self.params:
             out["params"] = dict(self.params)
+        if self.expect is not None:
+            out["expect"] = self.expect
         return out
 
 
@@ -341,6 +345,7 @@ def variables_used(pipeline: Pipeline) -> dict[str, list[str]]:
 
     for n in pipeline.nodes:
         walk(n.params, n.id)
+        walk(n.expect, n.id)
     return used
 
 
@@ -371,7 +376,8 @@ def bind(pipeline: Pipeline, overrides: dict[str, Any] | None = None) -> Pipelin
     if missing:
         raise SpecError([Issue(nids[0], f"uses ${{{name}}}, which has no value; declare it under 'variables'")
                          for name, nids in missing.items()])
-    nodes = [Node(n.id, n.type, list(n.inputs), substitute_variables(n.params, values)) for n in pipeline.nodes]
+    nodes = [Node(n.id, n.type, list(n.inputs), substitute_variables(n.params, values),
+                  substitute_variables(n.expect, values)) for n in pipeline.nodes]
     return Pipeline(pipeline.name, nodes, pipeline.version, pipeline.description)
 
 
@@ -418,6 +424,10 @@ def validate(pipeline: Pipeline) -> list[Issue]:
         if len(set(node.inputs)) != len(node.inputs):
             issues.append(Issue(node.id, "the same input is listed twice"))
         _check_params(issues, node)
+        if node.expect is not None:
+            from redcliff.expect import parse_expectations
+
+            issues += [Issue(node.id, m) for m in parse_expectations(node.id, node.expect)[1]]
 
     if not issues:
         try:

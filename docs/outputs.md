@@ -30,6 +30,7 @@ models/sources.yml       table sources become source('raw', ...)
 models/int_<step>.sql    one ephemeral model per step
 models/<table>.sql       one model per target, named after its table
 models/schema.yml        every model's columns, described with their lineage
+tests/<step>__<check>.sql one data test per expectation
 ```
 
 | Spec | dbt |

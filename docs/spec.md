@@ -60,6 +60,38 @@ Rules the compiler follows:
 Declaring `columns` on sources is optional but recommended: lineage and early error checks
 work best when Redcliff knows each source's schema.
 
+## Expectations
+
+Any step can declare data quality checks on its rows under `expect` (a target's apply to the rows
+it writes):
+
+```yaml
+- id: orders
+  type: source
+  params: {format: csv, path: ../data/orders.csv}
+  expect:
+    - unique: order_id                     # or a list of columns
+    - not_null: customer_id
+    - accepted_values: {column: status, values: [shipped, pending, cancelled]}
+    - condition: amount >= 0               # any SQL that must hold on each row
+      name: amount_is_positive             # optional; one is made up otherwise
+      severity: warn                       # error (the default) or warn
+    - row_count: {min: 1, max: 1000000}
+```
+
+A row fails `not_null`, `accepted_values` or `condition` when the condition is false; a NULL result
+passes, as in a SQL CHECK constraint, so pair `accepted_values` with `not_null` to rule out NULLs.
+`unique` ignores keys with a NULL in them.
+
+| Where | What happens |
+| --- | --- |
+| `redcliff test pipeline.yaml` | runs every check in DuckDB, with a few failing rows each; exits 1 if an `error` check fails |
+| `redcliff run` | runs the checks first and doesn't write if an `error` check fails (`--skip-checks` writes anyway) |
+| playground | each step card shows its checks' result, and the Data tab lists them with failing rows |
+| dbt | one singular data test per check under `tests/`; a step with checks is a view instead of ephemeral, so tests can read it; `warn` sets `severity='warn'` |
+| Lakeflow | row-level checks become `@expect` decorators: `expect_or_fail` (or `expect` for `warn`) where the platform has expectations (Databricks); open-source Spark 4.1 has none yet, so there they do nothing. `unique` and `row_count` are listed as job tasks |
+| MCP server | `run_checks`, and `set_expectations` in `propose_edit` |
+
 ## Merge targets
 
 `mode: merge` updates the table's rows whose `keys` match an incoming row, inserts the rest, and

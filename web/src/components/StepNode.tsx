@@ -1,8 +1,8 @@
 import { Handle, Position, useStore, type NodeProps, type Node } from "@xyflow/react";
-import { CircleAlert, Rows3, TriangleAlert, Unlink, Wrench } from "lucide-react";
+import { CircleAlert, Rows3, ShieldAlert, ShieldCheck, TriangleAlert, Unlink, Wrench } from "lucide-react";
 import { memo, useState } from "react";
 import { MAX_COLUMNS, NODE_WIDTH } from "../layout";
-import { STEP_LABELS, summarize, type ScoreStatus, type Step } from "../model";
+import { STEP_LABELS, summarize, type CheckTally, type ScoreStatus, type Step } from "../model";
 import type { Highlight } from "../lineage";
 import { StepIcon } from "../ui";
 
@@ -10,6 +10,7 @@ export type StepData = {
   step: Step;
   columns: string[];
   rowCount: number | null | undefined;
+  checks: CheckTally | null; // its expectations' results, when it has some
   issues: string[];
   highlight: Highlight | null;
   selected: boolean;
@@ -32,8 +33,18 @@ const SCORE_COLOR: Record<ScoreStatus, string> = { converted: "var(--ok)", revie
 /** Below this zoom, cards trade their column lists for a large, readable title. */
 export const FAR_ZOOM = 0.5;
 
+function Checks({ tally, total }: { tally: CheckTally; total: number }) {
+  const ran = tally.passed + tally.failed + tally.warned;
+  const state = tally.failed ? "failed" : tally.warned ? "warned" : ran ? "passed" : "pending";
+  const text = !ran ? `${total} ${total === 1 ? "check" : "checks"}`
+    : tally.failed ? `${tally.failed} of ${ran} checks failed`
+      : tally.warned ? `${tally.warned} of ${ran} checks warn` : `${ran} ${ran === 1 ? "check" : "checks"} passed`;
+  const Icon = tally.failed || tally.warned ? ShieldAlert : ShieldCheck;
+  return <div className={`step-checks ${state}`} title="Data quality expectations, run in DuckDB"><Icon />{text}</div>;
+}
+
 function StepNodeView({ data }: NodeProps<StepNodeType>) {
-  const { step, columns, rowCount, issues, highlight, selected, score, scored } = data;
+  const { step, columns, rowCount, checks, issues, highlight, selected, score, scored } = data;
   const [expanded, setExpanded] = useState(false);
   // Bucketed so panning and small zoom steps don't re-render every card.
   const zoom = useStore((s) => (s.transform[2] < FAR_ZOOM ? Math.round(s.transform[2] * 40) / 40 : 1));
@@ -66,6 +77,7 @@ function StepNodeView({ data }: NodeProps<StepNodeType>) {
         </div>
         <span className="step-rows">{rows(rowCount)}</span>
       </div>
+      {checks && <Checks tally={checks} total={step.expect?.length ?? 0} />}
       <div className="step-summary" title={summary}>{summary}</div>
       {(breaks || rowsChange || (score && score !== "converted")) && (
         <div className="step-badges">

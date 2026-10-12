@@ -146,9 +146,15 @@ def apply_operations(data: dict, operations: list[dict]) -> dict:
                 other["inputs"] = [new if x == op["id"] else x for x in other.get("inputs", [])]
         elif kind == "set_description":
             data["description"] = op.get("description", "")
+        elif kind == "set_expectations":
+            n = find(op.get("id", ""))
+            if op.get("expect"):
+                n["expect"] = op["expect"]
+            else:
+                n.pop("expect", None)
         else:
             raise ToolError(f"operation {i}: unknown op {kind!r}; use add_step, update_step, remove_step, "
-                            "rename_step or set_description")
+                            "rename_step, set_description or set_expectations")
     return data
 
 
@@ -307,6 +313,18 @@ class Server:
             rows = trace_rows(self.duck(), pipeline, step, where, p.parent)[:limit]
             return json.loads(json.dumps({"rows": rows}, default=str))
 
+        @tool("run_checks", "Run expectations", "Run the pipeline's data quality expectations in DuckDB: each "
+              "check's result, with a few failing rows. Pass step to check one step.",
+              {**spec, "step": S}, ["spec"])
+        def run_checks_(spec, step=None):
+            from redcliff.expect import run_checks
+
+            p, pipeline = self.pipeline(spec)
+            results = [r.to_dict() for r in run_checks(self.duck(), pipeline, step, p.parent)]
+            return {"checks": results, "passed": sum(r["passed"] for r in results),
+                    "failed": sum(not r["passed"] and r["severity"] == "error" for r in results),
+                    "warned": sum(not r["passed"] and r["severity"] == "warn" for r in results)}
+
         ops_schema = {
             "type": "array",
             "description": (
@@ -315,9 +333,11 @@ class Server:
                 "(feeds rewires those steps to read it instead of its inputs); "
                 "{op: update_step, id, type?, inputs?, params?} merges params (a null value removes a key); "
                 "{op: remove_step, id, rewire_to?}; {op: rename_step, id, new_id}; "
-                "{op: set_description, description}."),
+                "{op: set_description, description}; {op: set_expectations, id, expect: [...]} replaces a step's "
+                "data quality checks."),
             "items": {"type": "object", "properties": {"op": {"type": "string", "enum": [
-                "add_step", "update_step", "remove_step", "rename_step", "set_description"]}}, "required": ["op"]},
+                "add_step", "update_step", "remove_step", "rename_step", "set_description", "set_expectations"]}},
+                      "required": ["op"]},
         }
 
         @tool("propose_edit", "Propose an edit", "Validate a change to a spec and return what it does (steps, "

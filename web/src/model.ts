@@ -6,7 +6,33 @@ export type Step = {
   type: StepType;
   inputs?: string[];
   params?: Record<string, unknown>;
+  expect?: Record<string, unknown>[];
 };
+
+/** One data quality expectation, run in DuckDB. */
+export type CheckRun = {
+  node: string;
+  name: string;
+  kind: string;
+  severity: "error" | "warn";
+  describe: string;
+  failures: number | null; // null: the check couldn't run
+  columns: string[];
+  sample: unknown[][];
+  error?: string;
+};
+
+export type CheckTally = { passed: number; failed: number; warned: number };
+
+export function tally(runs: CheckRun[]): CheckTally {
+  const t = { passed: 0, failed: 0, warned: 0 };
+  for (const r of runs) {
+    if (r.failures === 0) t.passed++;
+    else if (r.severity === "warn") t.warned++;
+    else t.failed++;
+  }
+  return t;
+}
 
 export type Spec = {
   version: 0;

@@ -23,6 +23,7 @@ import sqlglot
 from sqlglot import exp
 
 from redcliff.columns import infer_columns
+from redcliff.expect import expectations
 from redcliff.compile import _node_body
 from redcliff.lineage import Ref, build_graph, trace_to_sources
 from redcliff.spec import Node, Pipeline, bind
@@ -120,6 +121,7 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
         f"profile: {project}",
         "model-paths: [models]",
         "seed-paths: [seeds]",
+        "test-paths: [tests]",
         "models:",
         f"  {project}:",
         "    +materialized: ephemeral  # steps compile into their targets' queries",
@@ -175,7 +177,8 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
         if n.type == "source" and n.params["format"] == "parquet":
             path = _yaml_str(n.params["path"])[1:-1]
             read = f"read_parquet('{path}')" if dialect == "duckdb" else f"parquet.`{path}`"
-            files[f"models/{model_name[n.id]}.sql"] = f"-- {n.id}: source (parquet)\nSELECT * FROM {read}\n"
+            view = "{{ config(materialized='view') }}\n" if n.expect else ""
+            files[f"models/{model_name[n.id]}.sql"] = f"-- {n.id}: source (parquet)\n{view}SELECT * FROM {read}\n"
 
     # ------------------------------------------------------------------ steps and targets
     docs = ["version: 2", "models:"]
@@ -183,7 +186,9 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
         if node.type == "source":
             continue
         if node.type != "target":
-            files[f"models/{model_name[node.id]}.sql"] = f"-- {node.id}: {node.type}\n{model_sql(node)}\n"
+            view = "{{ config(materialized='view') }}  -- it has data tests, which need a relation\n" \
+                if node.expect else ""
+            files[f"models/{model_name[node.id]}.sql"] = f"-- {node.id}: {node.type}\n{view}{model_sql(node)}\n"
             documented = node.id
         else:
             p = node.params
@@ -230,6 +235,15 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
                 docs.append(f"      - name: {c}")
                 docs.append(f"        description: {_yaml_str(_lineage_text(graph, documented, c))}")
     files["models/schema.yml"] = "\n".join(docs) + "\n"
+    # Expectations become singular data tests: each returns the rows that break it.
+    for e in expectations(pipeline):
+        node = by_id[e.node]
+        rel = relation(e.node) if node.type != "target" else f"{{{{ ref('{model_name[e.node]}') }}}}"
+        sql = sqlglot.transpile(e.failing_sql("__rc_relation__"), write=dialect, pretty=True)[0]
+        sql = re.sub(r'["`]?__rc_relation__["`]?', lambda _m, r=rel: r, sql)
+        config = "{{ config(severity='warn') }}\n" if e.severity == "warn" else ""
+        files[f"tests/{e.node}__{e.name}.sql"] = f"-- {e.node}: expect {e.describe()}\n{config}{sql}\n"
+
     if variables:
         token = re.compile(r'["`]?__rcvar_([A-Za-z0-9_]+?)__["`]?', re.IGNORECASE)
         by_lower = {k.lower(): k for k in variables}

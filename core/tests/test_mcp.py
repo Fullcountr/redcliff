@@ -45,6 +45,7 @@ def test_handshake_and_tool_list(server):
     assert server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
     tools = {t["name"]: t for t in server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]}
     assert set(tools) == {"list_pipelines", "describe_pipeline", "column_lineage", "impact", "compile", "preview",
+                          "run_checks",
                           "trace_rows", "propose_edit", "apply_edit", "import_legacy"}
     assert tools["apply_edit"]["annotations"]["readOnlyHint"] is False
     assert all(t["annotations"]["readOnlyHint"] for n, t in tools.items() if n != "apply_edit")
@@ -157,3 +158,14 @@ def test_edits_keep_the_files_layout():
     assert changed == ["      mode: append"]  # the comment, flow mappings and blank lines all stay
     renamed = edit_spec_text(text, {**after, "name": "revenue"})
     assert renamed.startswith("version: 0\nname: revenue\n") and yaml.safe_load(renamed)["name"] == "revenue"
+
+
+def test_checks_and_editing_them(server):
+    result = ok(server, "run_checks", spec=SPEC)
+    assert (result["passed"], result["failed"]) == (5, 0)
+    prop = ok(server, "propose_edit", spec=SPEC, operations=[
+        {"op": "set_expectations", "id": "shipped", "expect": [{"accepted_values": {"column": "status", "values": ["x"]}}]}])
+    assert prop["can_apply"], prop["issues"]
+    ok(server, "apply_edit", proposal_id=prop["proposal_id"])
+    result = ok(server, "run_checks", spec=SPEC, step="shipped")
+    assert result["failed"] == 1 and result["checks"][0]["failures"] == 6

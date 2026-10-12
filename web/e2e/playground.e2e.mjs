@@ -118,6 +118,13 @@ await step("selecting a step previews its data", async () => {
   await shot(page, "04-data");
 });
 
+await step("expectations run and show on the cards and in the Data tab", async () => {
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="orders"] .step-checks')?.textContent === "3 checks passed", null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="revenue_by_region"] .step-checks')?.textContent === "2 checks passed");
+  const names = await page.locator(".checks .check .name").allTextContents();
+  assert.deepEqual(names, ["revenue_is_positive", "row_count"]);
+});
+
 await step("clicking a row traces it to the source rows behind it", async () => {
   await page.locator(".data table tbody tr", { hasText: "South" }).first().click();
   await page.waitForSelector(".behind-source");

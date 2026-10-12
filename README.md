@@ -132,7 +132,7 @@ no lock-in: it's your code in your repo.
 <td valign="top">
 
 **Check it on real rows.** Every step shows its row count and previews its data, computed by
-DuckDB inside your browser. Click a row to see exactly which source rows are behind it. Drop in
+DuckDB inside your browser, and runs its data quality expectations. Click a row to see exactly which source rows are behind it. Drop in
 your own CSV files to try your own data. Share the whole
 pipeline as a link; there is no server to store it on.
 
@@ -380,6 +380,7 @@ pipeline, connected through the tables its mappings write and read. The full lis
 | `redcliff compile pipeline.yaml --to dbt\|lakeflow -o DIR` | generate a dbt project or a Lakeflow Declarative Pipeline ([details](docs/outputs.md)) |
 | `redcliff lineage pipeline.yaml [--column N.C \| --impact N.C \| --openlineage N]` | lineage |
 | `redcliff run pipeline.yaml [--db file.duckdb] [--node ID]` | run or preview locally with DuckDB |
+| `redcliff test pipeline.yaml [--node ID]` | run the data quality expectations ([details](docs/spec.md#expectations)) |
 | `redcliff trace pipeline.yaml STEP [--where COND]` | row-level trace: each row of a step with the source rows behind it |
 | `redcliff diff old.yaml new.yaml [--data]` or `redcliff diff --git REF` | what a change does: steps, columns, lineage and rows ([details](docs/pr-bot.md)) |
 | `redcliff mcp --root .` | an MCP server, so AI agents can read and edit pipelines, with a diff you accept first ([details](docs/mcp.md)) |
@@ -420,6 +421,7 @@ flowchart LR
 | Spec | every validation rule, every example, round trips through YAML and JSON |
 | Compiler | generated DuckDB SQL runs on sample data and must match rows worked out by hand |
 | Lineage | each example's column map compared against one worked out by hand |
+| Expectations | every check kind passes and fails on rows worked out by hand; a failing check stops `redcliff run` and fails `dbt build` |
 | Row trace | tracing never changes a step's rows; every traced target row is rebuilt from only its source rows |
 | Diff | step, column, lineage and row changes for edited examples, worked out by hand; `--git` mode on a scratch repository |
 | MCP | the protocol over real stdio, every tool, and edits: proposed without writing, applied once, refused when stale or broken, untouched steps kept byte for byte |
@@ -486,10 +488,10 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 - [x] Pull request bot: lineage and data diffs posted on every PR ([`uses: Fullcountr/redcliff@main`](docs/pr-bot.md))
 - [x] Pipeline variables: `${name}` with defaults and `--var` overrides; PowerCenter `$$PARAMS` import as variables, dbt gets `var()`
 - [x] Merge targets (`mode: merge` with `keys` and `delete_when`); PowerCenter Update Strategy upserts import as merges
+- [x] Data quality expectations on any step: `redcliff test`, results on the canvas, dbt tests and Lakeflow expectations
 
 ### Next
 
-- [ ] Data quality expectations on any step, compiled to DuckDB checks, dbt tests and Lakeflow `@dp.expect`
 - [ ] A variables panel in the playground, to change a run's values and see the rows change
 - [ ] SSIS package (`.dtsx`) importer
 - [ ] `pip install redcliff` from PyPI, with a release workflow

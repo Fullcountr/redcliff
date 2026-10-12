@@ -20,6 +20,7 @@ import sqlglot
 from sqlglot import exp
 
 from redcliff.columns import infer_columns
+from redcliff.expect import expectations
 from redcliff.compile import variables_note, _dataframe, _path, _statement, _transpile, _type_sql
 from redcliff.spec import Pipeline, bind
 
@@ -70,12 +71,30 @@ def compile_lakeflow(pipeline: Pipeline, base_dir: str | Path | None = None,
         "from pyspark.sql import functions as F",
     ]
     job_notes: list[str] = []
+    checks = {}
+    for e in expectations(pipeline):
+        checks.setdefault(e.node, []).append(e)
+
+    def expect_lines(node) -> list[str]:
+        """Row-level expectations as decorators; the rest become job notes."""
+        out = []
+        for e in checks.get(node.id, []):
+            if e.row_level:
+                cond = sqlglot.parse_one(e.condition).sql("spark")
+                out.append(f"@expect({e.name!r}, {cond!r}" + (", fail=False)" if e.severity == "warn" else ")"))
+            else:
+                job_notes.append(f"{node.id}: check {e.describe()} ({e.name}) after the pipeline, e.g. "
+                                 "with redcliff test")
+        return out
+
     for node in pipeline.topo_order():
         p, t = node.params, node.type
-        fn = node.id + "_" if node.id in ("dp", "spark", "F", "DataFrame") else node.id
+        fn = node.id + "_" if node.id in ("dp", "spark", "F", "DataFrame", "expect") else node.id
         if t == "source":
             if p["format"] == "table":
                 if p["table"] == node.id:
+                    for e in checks.get(node.id, []):
+                        job_notes.append(f"{node.id}: check {e.describe()} ({e.name}) on the table it reads")
                     continue  # read in place: steps refer to the table by this name
                 body = f"spark.read.table({p['table']!r})"
             else:
@@ -86,8 +105,8 @@ def compile_lakeflow(pipeline: Pipeline, base_dir: str | Path | None = None,
                         ddl = ", ".join(f"{c} {_type_sql(ty, 'spark')}" for c, ty in p["columns"].items())
                         reader += f".schema({ddl!r})"
                 body = f"{reader}.{p['format']}({_path(node, base_dir)!r})"
-            lines += ["", "", f"@dp.temporary_view(name={dataset[node.id]!r})", f"def {fn}() -> DataFrame:",
-                      f'    """{node.id}: source"""', f"    return {body}"]
+            lines += ["", "", *expect_lines(node), f"@dp.temporary_view(name={dataset[node.id]!r})",
+                      f"def {fn}() -> DataFrame:", f'    """{node.id}: source"""', f"    return {body}"]
         elif t == "target":
             src = read(node.inputs[0])
             if p.get("mode") == "merge":
@@ -108,7 +127,7 @@ def compile_lakeflow(pipeline: Pipeline, base_dir: str | Path | None = None,
             lines += ["", ""]
             if comment:
                 lines.append(f"# {comment}")
-            lines += [f"@dp.materialized_view(name={table!r})", f"def {fn}() -> DataFrame:",
+            lines += [*expect_lines(node), f"@dp.materialized_view(name={table!r})", f"def {fn}() -> DataFrame:",
                       f'    """{node.id}: target"""', f"    return {src}"]
             for key, when in (("pre_sql", "before"), ("post_sql", "after")):
                 for sql in p.get(key) or []:
@@ -118,8 +137,18 @@ def compile_lakeflow(pipeline: Pipeline, base_dir: str | Path | None = None,
                 body = f"spark.sql({sql_query(node)!r})"
             else:
                 body = _dataframe(node, [read(i) for i in node.inputs], cols)
-            lines += ["", "", f"@dp.temporary_view(name={dataset[node.id]!r})", f"def {fn}() -> DataFrame:",
-                      f'    """{node.id}: {t}"""', f"    return {body}"]
+            lines += ["", "", *expect_lines(node), f"@dp.temporary_view(name={dataset[node.id]!r})",
+                      f"def {fn}() -> DataFrame:", f'    """{node.id}: {t}"""', f"    return {body}"]
+    if checks and any(e.row_level for es in checks.values() for e in es):
+        at = next(i for i, line in enumerate(lines) if line.startswith("from pyspark.sql import functions"))
+        lines[at + 1:at + 1] = [
+            "", "",
+            "def expect(name: str, condition: str, fail: bool = True):",
+            '    """A Lakeflow expectation where the platform has them (Databricks); open-source Spark 4.1',
+            '    has no expectations yet, so there it changes nothing. Check with `redcliff test`."""',
+            '    decorate = getattr(dp, "expect_or_fail" if fail else "expect", None)',
+            "    return decorate(name, condition) if decorate else (lambda f: f)",
+        ]
     if job_notes:
         at = lines.index('"""')
         lines[at:at] = ["", "Steps with no declarative form; run them as job tasks around the pipeline:"] + \

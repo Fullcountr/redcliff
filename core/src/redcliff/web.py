@@ -104,6 +104,19 @@ def source_rows(spec: Any, source_id: str, rows: Any) -> dict[str, Any]:
 
 
 @_wrap
+def checks(spec: Any, node_id: str | None = None) -> dict[str, Any]:
+    """The step's expectations (or all of them), each with DuckDB SQL returning its failing rows."""
+    from redcliff.expect import check_queries
+
+    out = []
+    # Pyodide passes JavaScript null as a falsy jsnull, not None.
+    for e, sql in check_queries(_browser_paths(_load(spec)), node_id or None):
+        out.append({"node": e.node, "name": e.name, "kind": e.kind, "severity": e.severity,
+                    "describe": e.describe(), "sql": sql})
+    return {"checks": out}
+
+
+@_wrap
 def code(spec: Any, target: str, node_id: str | None = None) -> dict[str, Any]:
     """Generated code for the whole pipeline (or one node) in duckdb, spark or pyspark; or a whole
     project for dbt / lakeflow, as {"files": {path: content}}."""

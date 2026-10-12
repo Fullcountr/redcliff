@@ -6,7 +6,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { data, type QueryResult } from "../engine/data";
 import { engine } from "../engine/engine";
-import type { Analysis, Impact, Scorecard, ScoreItem, ScoreStatus, Spec, Step, StepType } from "../model";
+import type { Analysis, CheckRun, Impact, Scorecard, ScoreItem, ScoreStatus, Spec, Step, StepType } from "../model";
 import { STEP_LABELS, summarize } from "../model";
 import { STEP_ICONS, StepIcon, highlight } from "../ui";
 import { zip } from "../zip";
@@ -23,6 +23,7 @@ type Props = {
   notes: string[];
   ready: boolean; // engine and DuckDB both loaded
   engineReady: boolean;
+  checkRuns: CheckRun[];
   scorecard: Scorecard | null;
   activeItem: string | null;
   onPickItem: (name: string | null) => void;
@@ -264,7 +265,42 @@ function Cell({ v }: { v: unknown }) {
   return v === null ? <span className="null">null</span> : <>{String(v)}</>;
 }
 
-function DataPanel({ spec, selected, analysis, ready }: Props) {
+function CheckList({ runs }: { runs: CheckRun[] }) {
+  return (
+    <section className="checks" aria-label="Data quality checks">
+      <div className="section-head"><h3>Checks</h3><span className="chip">{runs.length}</span></div>
+      <ul className="check-list">
+        {runs.map((r) => {
+          const state = r.failures === 0 ? "passed" : r.failures === null ? "error" : r.severity === "warn" ? "warned" : "failed";
+          const result = r.failures === null ? "couldn't run" : r.failures === 0 ? "passed"
+            : `${r.failures} ${r.failures === 1 ? "row fails" : "rows fail"}${r.severity === "warn" ? " (warn)" : ""}`;
+          return (
+            <li key={r.name} className="check">
+              <div className="check-head">
+                <span className={`check-dot ${state}`} aria-label={state} />
+                <span className="name">{r.name}</span>
+                <span className="result">{result}</span>
+              </div>
+              <div className="what">{r.error ?? r.describe}</div>
+              {r.sample.length > 0 && (
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr>{r.columns.map((c) => <th key={c} scope="col">{c}</th>)}</tr></thead>
+                    <tbody>
+                      {r.sample.map((row, i) => <tr key={i}>{row.map((v, j) => <td key={j}><Cell v={v} /></td>)}</tr>)}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function DataPanel({ spec, selected, analysis, ready, checkRuns }: Props) {
   const nodeId = selected?.id ?? analysis?.order?.at(-1) ?? null;
   const [result, setResult] = useState<QueryResult | null>(null);
   const [trace, setTrace] = useState<{ provenance: Record<string, string>; opaque: string[] }>({ provenance: {}, opaque: [] });
@@ -393,6 +429,7 @@ function DataPanel({ spec, selected, analysis, ready }: Props) {
           )}
         </div>
       )}
+      {checkRuns.some((r) => r.node === nodeId) && <CheckList runs={checkRuns.filter((r) => r.node === nodeId)} />}
     </section>
   );
 }

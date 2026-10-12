@@ -41,6 +41,9 @@ export const engine = {
   previewQuery: (spec: Spec, node: string) => call<{ sql: string; node: string }>("preview_query", json(spec), node),
   code: (spec: Spec, target: string, node?: string | null) =>
     call<{ code: string; files?: Record<string, string> }>("code", json(spec), target, node ?? null),
+  checks: (spec: Spec, node?: string | null) =>
+    call<{ checks: { node: string; name: string; kind: string; severity: "error" | "warn"; describe: string; sql: string }[] }>(
+      "checks", json(spec), node ?? null),
   traceQuery: (spec: Spec, node: string) =>
     call<{ sql: string; node: string; columns: string[] | null; provenance: Record<string, string>; opaque: string[] }>(
       "trace_query", json(spec), node),

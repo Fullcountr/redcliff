@@ -8,6 +8,10 @@ nodes:
       format: csv
       path: ../data/orders.csv
       columns: {order_id: int, customer_id: int, order_date: date, status: text, amount: 'decimal(10,2)'}
+    expect:
+      - unique: order_id
+      - not_null: customer_id
+      - accepted_values: {column: status, values: [shipped, pending, cancelled]}
 
   - id: customers
     type: source
@@ -37,6 +41,10 @@ nodes:
       measures:
         revenue: SUM(amount)
         order_count: COUNT(*)
+    expect:
+      - condition: revenue > 0
+        name: revenue_is_positive
+      - row_count: {min: 1}
 
   - id: out
     type: target

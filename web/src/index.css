@@ -876,3 +876,27 @@ tbody tr.is-picked td:first-child { box-shadow: inset 2px 0 0 var(--oxide); }
 .behind-title { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12.5px; font-weight: 600; }
 .behind .table-wrap { max-height: 260px; }
 td.rowno { color: var(--text-3); }
+
+/* Data quality expectations */
+.step-checks {
+  display: flex; align-items: center; gap: 5px; margin: 0 10px 6px; padding: 2px 7px; width: fit-content;
+  border-radius: 999px; font-size: 10.5px; font-weight: 500; color: var(--text-2); background: var(--sunk);
+}
+.step-checks svg { width: 11px; height: 11px; }
+.step-checks.passed { color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.step-checks.warned { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.step-checks.failed { color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
+.step.is-far .step-checks { display: none; }
+.checks { margin-top: 18px; }
+.checks h3 { font-size: 13px; font-weight: 600; }
+.check-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.check { border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); padding: 8px 10px; }
+.check-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.check-head .name { font-family: var(--font-mono); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.check-head .result { margin-left: auto; white-space: nowrap; font-size: 11.5px; color: var(--text-2); }
+.check .what { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-2); margin-top: 3px; overflow-wrap: anywhere; }
+.check .table-wrap { margin-top: 8px; max-height: 180px; }
+.check-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--text-3); }
+.check-dot.passed { background: var(--ok); }
+.check-dot.warned { background: var(--warn); }
+.check-dot.failed { background: var(--bad); }
