@@ -9,6 +9,7 @@
     redcliff run pipeline.yaml --db warehouse.duckdb
     redcliff trace pipeline.yaml out --where "region = 'South'"
     redcliff diff old.yaml new.yaml --data            (or: redcliff diff --git origin/main)
+    redcliff mcp --root .                             (an MCP server for AI agents, over stdio)
 """
 
 from __future__ import annotations
@@ -330,6 +331,13 @@ def cmd_diff(args) -> int:
     return 1 if has_issues and args.fail_on_issues else 0
 
 
+def cmd_mcp(args) -> int:
+    from redcliff.mcp import serve
+
+    serve(args.root, args.db)
+    return 0
+
+
 # --------------------------------------------------------------------------- entry point
 
 
@@ -395,6 +403,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-issues", action="store_true", help="exit 1 if a new spec has problems")
     p.add_argument("-o", "--output")
     p.set_defaults(func=cmd_diff)
+
+    p = sub.add_parser("mcp", help="run an MCP server over stdio, so AI agents can read and edit pipelines")
+    p.add_argument("--root", default=".", help="the folder whose specs agents may read and edit (default: here)")
+    p.add_argument("--db", help="DuckDB database file holding table sources, for previews and traces")
+    p.set_defaults(func=cmd_mcp)
     return parser
 
 

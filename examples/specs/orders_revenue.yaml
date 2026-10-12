@@ -37,7 +37,6 @@ nodes:
       measures:
         revenue: SUM(amount)
         order_count: COUNT(*)
-        avg_amount: AVG(amount)
 
   - id: out
     type: target

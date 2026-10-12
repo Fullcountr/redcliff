@@ -131,7 +131,7 @@ class PipelineDiff:
                     out.append(f"- `{d.target}`: {d.note}")
                 for label, rows in (("added", d.added_sample), ("removed", d.removed_sample)):
                     if rows:
-                        out += ["", f"<details><summary><code>{d.target}</code>: rows {label}</summary>", "",
+                        out += ([""] if out[-1] else []) + [f"<details><summary><code>{d.target}</code>: rows {label}</summary>", "",
                                 "| " + " | ".join(d.columns) + " |", "|" + " --- |" * len(d.columns)]
                         out += ["| " + " | ".join(_cell(_fmt(v)) for v in r) + " |" for r in rows]
                         out += ["", "</details>"]
