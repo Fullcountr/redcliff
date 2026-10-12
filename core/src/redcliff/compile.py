@@ -20,7 +20,7 @@ from sqlglot import exp
 from sqlglot.dialects.dialect import Dialect
 
 from redcliff.columns import Columns, infer_columns
-from redcliff.spec import Node, Pipeline, bind
+from redcliff.spec import TABLE_PATTERN, Node, Pipeline, bind
 
 DIALECTS = ("duckdb", "spark")
 JOIN_SQL = {"inner": "JOIN", "left": "LEFT JOIN", "right": "RIGHT JOIN", "full": "FULL OUTER JOIN"}
@@ -59,6 +59,24 @@ def _ident(name: str) -> str:
 
 def _literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+def _table(node: Node) -> str:
+    """The table a source or target names, checked so that pasting it into code can only name a table."""
+    table = node.params["table"]
+    if not isinstance(table, str) or not TABLE_PATTERN.match(table):
+        raise CompileError(f"{node.id}: {table!r} is not a table name")
+    return table
+
+
+def _one_line(text) -> str:
+    """Spec text for a comment in generated code: one line, so it can't start a statement."""
+    return " ".join(str(text).split())
+
+
+def _doc_text(text) -> str:
+    """Spec text for a Python docstring or comment: one line, with no way to close the docstring."""
+    return _one_line(text).replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
 
 
 def _path(node: Node, base_dir: str | Path | None) -> str:
@@ -104,7 +122,7 @@ def _source_relation(node: Node, dialect: str, base_dir) -> str | None:
     """What a source reads from. None means "registered as a view named after the node"."""
     p = node.params
     if p["format"] == "table":
-        return p["table"]
+        return _table(node)
     if dialect == "spark":
         return None  # file sources are registered as temp views by the caller (see header)
     path = _literal(_path(node, base_dir))
@@ -180,7 +198,7 @@ def _cte_chain(pipeline: Pipeline, needed: set[str], dialect: str, base_dir) -> 
         if node.type == "source":
             relation = _source_relation(node, dialect, base_dir)
             if relation is None:
-                views.append(f"{node.id} <- {node.params['format']} {node.params['path']}")
+                views.append(f"{node.id} <- {node.params['format']} {_one_line(node.params['path'])}")
                 continue
             if relation == node.id:
                 continue  # the table already has the node's name
@@ -251,7 +269,7 @@ def _merge_statement(target: Node, dialect: str, blocks: list[str], columns: lis
     inner = f"{_with(blocks)}\nSELECT * FROM {src}" if blocks else f"SELECT * FROM {src}"
     using = "\n".join("  " + line for line in inner.splitlines())
     on = " AND ".join(f"existing.{q(k)} = incoming.{q(k)}" for k in keys)
-    lines = [f"MERGE INTO {p['table']} AS existing", f"USING (\n{using}\n) AS incoming", f"ON {on}"]
+    lines = [f"MERGE INTO {_table(target)} AS existing", f"USING (\n{using}\n) AS incoming", f"ON {on}"]
     delete = p.get("delete_when")
     if delete:
         cond = _qualify(delete, "incoming").sql(dialect)
@@ -264,7 +282,7 @@ def _merge_statement(target: Node, dialect: str, blocks: list[str], columns: lis
                  f"VALUES ({', '.join(f'incoming.{q(c)}' for c in columns)})")
     head = f"-- {target.id}: target (merge on {', '.join(keys)})\n"
     if dialect == "duckdb":  # the first run creates the table
-        head += (f"CREATE TABLE IF NOT EXISTS {p['table']} AS\n{inner}\nLIMIT 0;\n\n"
+        head += (f"CREATE TABLE IF NOT EXISTS {_table(target)} AS\n{inner}\nLIMIT 0;\n\n"
                  f"-- {target.id}: merge\n")
     else:
         head += "-- Spark runs MERGE on tables with row-level updates: Delta Lake or Iceberg.\n"
@@ -286,8 +304,8 @@ def _write_statement(target: Node, dialect: str, base_dir, blocks: list[str],
         full = f"{with_sql}\n{query}" if with_sql else query
         if fmt == "table":
             if mode == "append":
-                return f"-- {target.id}: target\nINSERT INTO {p['table']}\n{full}"
-            return f"-- {target.id}: target\nCREATE OR REPLACE TABLE {p['table']} AS\n{full}"
+                return f"-- {target.id}: target\nINSERT INTO {_table(target)}\n{full}"
+            return f"-- {target.id}: target\nCREATE OR REPLACE TABLE {_table(target)} AS\n{full}"
         if mode == "append":
             raise CompileError(f"{target.id}: DuckDB cannot append to a {fmt} file; use a table target")
         options = "FORMAT parquet" if fmt == "parquet" else "FORMAT csv, HEADER true"
@@ -297,7 +315,7 @@ def _write_statement(target: Node, dialect: str, base_dir, blocks: list[str],
     # spark
     if fmt == "table":
         verb = "INSERT INTO" if mode == "append" else "INSERT OVERWRITE TABLE"
-        insert = f"{verb} {p['table']}"
+        insert = f"{verb} {_table(target)}"
     else:
         if mode == "append":
             raise CompileError(f"{target.id}: Spark SQL cannot append to a directory; use PySpark or a table")
@@ -342,7 +360,7 @@ def compile_script(pipeline: Pipeline, dialect: str = "duckdb", base_dir=None) -
         statements += pre
         statements.append(_write_statement(target, dialect, base_dir, blocks, cols.get(target.inputs[0])))
         statements += post
-    header = f"-- Redcliff pipeline: {pipeline.name} ({dialect})\n" + variables_note(variables, "-- ")
+    header = f"-- Redcliff pipeline: {_one_line(pipeline.name)} ({dialect})\n" + variables_note(variables, "-- ")
     if dialect == "duckdb":
         notes = [line for t in targets for line in _hook_comments(t)]
         if notes:
@@ -362,7 +380,7 @@ def compile_pyspark(pipeline: Pipeline, base_dir=None) -> str:
     pipeline = bind(pipeline)
     cols = infer_columns(pipeline)
     lines = [
-        f'"""Redcliff pipeline: {pipeline.name}. Generated code; edit the spec, not this file."""',
+        f'"""Redcliff pipeline: {_doc_text(pipeline.name)}. Generated code; edit the spec, not this file."""',
         *([variables_note(variables, "# ").rstrip("\n")] if variables else []),
         "",
         "from pyspark.sql import SparkSession",
@@ -416,7 +434,7 @@ def compile_pyspark(pipeline: Pipeline, base_dir=None) -> str:
 def _pyspark_merge(node: Node, df: str) -> list[str]:
     """DataFrame.mergeInto (Spark 4): needs a table format with row-level updates (Delta, Iceberg)."""
     p = node.params
-    table = p["table"]
+    table = _table(node)
     name = table.split(".")[-1]
     on = " AND ".join(f"{name}.{k} = incoming.{k}" for k in p["keys"])
     out = ["# Spark runs MERGE on tables with row-level updates: Delta Lake or Iceberg.",

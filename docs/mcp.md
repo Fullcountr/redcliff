@@ -80,7 +80,10 @@ doesn't touch keep their exact text, comments included. `apply_edit` refuses whe
 
 ## Safety
 
-- Paths outside `--root` are refused.
+- Paths outside `--root` are refused: the spec paths tools take, and the source and target paths
+  inside the specs.
+- Previews, traces and checks run in a DuckDB that can reach only files under `--root`, with no
+  network, and a spec can't change that.
 - The only tool that writes is `apply_edit`, and it's marked as such (`readOnlyHint: false`), so
   clients that ask before a write will ask.
 - Generated code is never written: the spec is the source of truth, and code is generated from it.

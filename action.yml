@@ -75,7 +75,8 @@ runs:
         REPORT: ${{ steps.diff.outputs.report }}
       run: |
         existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
-          --jq '.[] | select(.body | startswith("<!-- redcliff-diff -->")) | .id' | head -n 1)
+          --jq '.[] | select(.user.login == "github-actions[bot]" and .user.type == "Bot")
+                | select(.body | startswith("<!-- redcliff-diff -->")) | .id' | head -n 1)
         if [ -n "$existing" ]; then
           gh api -X PATCH "repos/$REPO/issues/comments/$existing" -F "body=@$REPORT" > /dev/null \
             || echo "::warning::Couldn't update the Redcliff comment (a pull request from a fork has a read-only token)."

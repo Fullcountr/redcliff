@@ -195,6 +195,12 @@ class Server:
             issues = validate(pipeline)
             if issues:
                 raise ToolError("the spec has problems:\n" + "\n".join(f"- {i}" for i in issues))
+        from redcliff.confine import OutsideRoot, check_paths
+
+        try:
+            check_paths(pipeline, p.parent, self.root)
+        except OutsideRoot as e:
+            raise ToolError(f"{spec}: {e}; specs here may only use files in the workspace") from None
         return p, pipeline
 
     def duck(self):
@@ -202,7 +208,10 @@ class Server:
             import duckdb
         except ImportError as e:
             raise ToolError("previews need DuckDB: pip install 'redcliff[cli]'") from e
-        return duckdb.connect(self.db, read_only=True) if self.db else duckdb.connect()
+        from redcliff.confine import lock_duckdb
+
+        con = duckdb.connect(self.db, read_only=True) if self.db else duckdb.connect()
+        return lock_duckdb(con, self.root)  # spec SQL may touch only workspace files, and no network
 
     # ------------------------------------------------------------------ tools
 

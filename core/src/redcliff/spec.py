@@ -25,6 +25,9 @@ from sqlglot.errors import ParseError
 
 SPEC_VERSION = 0
 ID_PATTERN = re.compile(r"^[a-z_][a-z0-9_]*$")
+# A table a source reads or a target writes: name, schema.name or catalog.schema.name. The compilers
+# paste it into SQL, Python and Jinja, so it must never be able to carry anything but a name.
+TABLE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*(\.[A-Za-z_][A-Za-z0-9_$]*){0,2}$")
 VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 NODE_TYPES = ("source", "filter", "select", "derive", "join", "aggregate", "union", "sql", "target")
@@ -165,15 +168,31 @@ class SpecError(ValueError):
 # --------------------------------------------------------------------------- validation
 
 
+def file_reads(tree: exp.Expression) -> list[str]:
+    """Tables in ``tree`` that would read something other than a pipeline step: table functions
+    such as read_text('...') or read_csv('...'), and quoted names such as 'data.csv', which DuckDB
+    reads as files. Spec SQL reaches files only through source steps, whose paths are checked."""
+    found = []
+    for table in tree.find_all(exp.Table):
+        if not isinstance(table.this, exp.Identifier):
+            found.append(table.this.sql())
+        elif not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_$]*", table.name):
+            found.append(table.name)
+    return found
+
+
 def _check_expr(issues: list[Issue], nid: str, label: str, sql: Any) -> None:
     if not isinstance(sql, str) or not sql.strip():
         issues.append(Issue(nid, f"{label} must be a non-empty SQL expression"))
         return
     try:
-        sqlglot.parse_one(sql)
+        tree = sqlglot.parse_one(sql)
     except ParseError as e:
         first = str(e).splitlines()[0]
         issues.append(Issue(nid, f"{label} is not valid SQL ({sql!r}): {first}"))
+        return
+    for what in file_reads(tree):
+        issues.append(Issue(nid, f"{label} reads {what!r}; read files with a source step"))
 
 
 def _check_name(issues: list[Issue], nid: str, label: str, name: Any) -> None:
@@ -199,6 +218,11 @@ def _check_io(issues: list[Issue], nid: str, params: dict, writing: bool) -> Non
     key = "table" if fmt == "table" else "path"
     if not isinstance(params.get(key), str) or not params[key].strip():
         issues.append(Issue(nid, f"format '{fmt}' needs a '{key}'"))
+    elif key == "table" and not TABLE_PATTERN.match(params[key]):
+        issues.append(Issue(nid, f"'table' {params[key]!r} must be a table name: name, schema.name "
+                                 "or catalog.schema.name"))
+    elif any(c in params[key] for c in "\r\n\0"):
+        issues.append(Issue(nid, f"'{key}' must be a single line"))
     if writing:
         mode = params.get("mode", "overwrite")
         if mode not in WRITE_MODES:
@@ -256,6 +280,8 @@ def _check_sql_node(issues: list[Issue], node: Node) -> None:
     if not isinstance(tree, exp.Query):
         issues.append(Issue(node.id, "'query' must be a SELECT (or a UNION of SELECTs)"))
         return
+    for what in file_reads(tree):
+        issues.append(Issue(node.id, f"'query' reads {what!r}; a SQL step may read only its inputs"))
     local = {cte.alias_or_name for cte in tree.find_all(exp.CTE)}
     for table in tree.find_all(exp.Table):
         if table.name and table.name not in local and table.name not in node.inputs:
@@ -393,6 +419,8 @@ def validate(pipeline: Pipeline) -> list[Issue]:
         issues.append(Issue(None, f"unsupported spec version {pipeline.version!r}; expected {SPEC_VERSION}"))
     if not isinstance(pipeline.name, str) or not pipeline.name.strip():
         issues.append(Issue(None, "'name' is required"))
+    elif any(ord(c) < 32 for c in pipeline.name):
+        issues.append(Issue(None, "'name' must be a single line of text"))
     if not pipeline.nodes:
         issues.append(Issue(None, "a pipeline needs at least one node"))
 

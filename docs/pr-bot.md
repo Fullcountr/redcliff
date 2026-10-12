@@ -49,7 +49,9 @@ into a failing exit code.
 | `--format json`, `-o FILE` | machine-readable output, or write to a file |
 
 With `--git`, both versions read the sample data in the working tree, so the data section shows
-what the spec change does on the same rows.
+what the spec change does on the same rows. Specs in a pull request may read only files in the
+repository: a source path outside it is reported as an issue, and the data runs in a DuckDB that
+can't reach other files or the network.
 
 ## The pull request bot
 
@@ -70,6 +72,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: Fullcountr/redcliff@main
 ```
 

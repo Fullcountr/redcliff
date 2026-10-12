@@ -121,10 +121,15 @@ def _write_project(files: dict[str, str], out_dir: str | None) -> None:
         for rel, content in files.items():
             print(f"# ==== {rel}\n{content}", end="" if content.endswith("\n") else "\n")
         return
+    from redcliff.dbt import project_path
+
+    try:
+        paths = {rel: project_path(out_dir, rel) for rel in files}  # check every name before writing anything
+    except ValueError as e:
+        raise SystemExit(f"redcliff: {e}") from None
     for rel, content in files.items():
-        path = Path(out_dir) / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        paths[rel].parent.mkdir(parents=True, exist_ok=True)
+        paths[rel].write_text(content, encoding="utf-8")
     _err(f"wrote {len(files)} files to {out_dir}")
 
 
@@ -318,12 +323,28 @@ def _as_pipeline(text: str | None):
         return None
 
 
-def _diff_one(base, head, args, base_dir, head_dir):
+def _unreadable(rel: str):
+    from redcliff.diff import PipelineDiff
+
+    diff = PipelineDiff(name=Path(rel).stem)
+    diff.issues.append(f"{rel} looks like a pipeline spec but isn't valid YAML or JSON")
+    return diff
+
+
+def _diff_one(base, head, args, base_dir, head_dir, root):
+    from redcliff.confine import OutsideRoot, check_paths, lock_duckdb
     from redcliff.diff import data_diff, diff_pipelines
     from redcliff.spec import Pipeline
 
     base = base or Pipeline(name=head.name, nodes=[])
     diff = diff_pipelines(base, head)
+    if args.data and not diff.issues:
+        # The specs may come from a pull request: they may read only files of the repository.
+        try:
+            check_paths(head, head_dir, root)
+            check_paths(base, base_dir, root)
+        except OutsideRoot as e:
+            diff.issues.append(f"{e}; data diffs read only files in the repository")
     if args.data and not diff.issues:
         try:
             import duckdb
@@ -331,7 +352,7 @@ def _diff_one(base, head, args, base_dir, head_dir):
             _err("--data needs DuckDB: pip install duckdb")
         else:
             con = duckdb.connect(args.db, read_only=True) if args.db else duckdb.connect()
-            diff.data = data_diff(base, head, con, base_dir, head_dir)
+            diff.data = data_diff(base, head, lock_duckdb(con, root), base_dir, head_dir)
     return diff
 
 
@@ -340,9 +361,11 @@ def cmd_diff(args) -> int:
     results = []  # (label, diff)
     if args.git:
         root = _git("rev-parse", "--show-toplevel").strip()
-        names = _git("diff", "--name-only", "--diff-filter=ACMRD", args.git, "--", *(args.paths or ["."]), cwd=None)
+        # -z: NUL-separated and unquoted, so names with spaces or non-ASCII letters arrive whole
+        names = _git("diff", "-z", "--name-only", "--diff-filter=ACMRD", args.git, "--", *(args.paths or ["."]),
+                     cwd=None)
         prefix = _git("rev-parse", "--show-prefix").strip()
-        for rel in names.split():
+        for rel in filter(None, names.split("\0")):
             if not rel.endswith((".yaml", ".yml", ".json")):
                 continue
             path = Path(root) / rel
@@ -353,12 +376,14 @@ def cmd_diff(args) -> int:
                 base_text = None
             base, head = _as_pipeline(base_text), _as_pipeline(head_text)
             if head is None and base is None:
+                if head_text is not None and rel.endswith((".yaml", ".yml")) and "nodes:" in head_text:
+                    results.append((rel, _unreadable(rel)))  # looks like a spec but doesn't parse: say so
                 continue
             label = rel[len(prefix):] if prefix and rel.startswith(prefix) else rel
             if head is None:
                 results.append((label, None))
                 continue
-            results.append((label, _diff_one(base, head, args, path.parent, path.parent)))
+            results.append((label, _diff_one(base, head, args, path.parent, path.parent, root)))
     else:
         if not args.paths or len(args.paths) != 2:
             _err("give two specs (BASE HEAD), or --git REF")
@@ -369,7 +394,11 @@ def cmd_diff(args) -> int:
         if base is None or head is None:
             _err("both files must be pipeline specs")
             return 1
-        results.append((str(b), _diff_one(base, head, args, a.parent, b.parent)))
+        try:
+            root = _git("rev-parse", "--show-toplevel").strip()
+        except FileNotFoundError:
+            root = str(Path.cwd())
+        results.append((str(b), _diff_one(base, head, args, a.parent, b.parent, root)))
 
     if args.format == "json":
         text = json.dumps({label: (d.to_dict() if d else {"removed": True}) for label, d in results}, indent=2) + "\n"
