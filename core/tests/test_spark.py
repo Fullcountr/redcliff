@@ -268,3 +268,15 @@ def test_informatica_expressions_agree_on_spark_and_duckdb(spark, duck, text):
     spark_sql = sqlglot.transpile(neutral, write="spark")[0]
     duck_sql = sqlglot.transpile(neutral, write="duckdb")[0]
     assert rows(spark.sql(spark_sql).collect()) == rows(duck.execute(duck_sql).fetchall()), spark_sql
+
+
+def test_spark_parses_merge_statements(spark):
+    """Running MERGE needs Delta or Iceberg, which this Spark doesn't have; its parser checks the SQL."""
+    data = yaml.safe_load((SPECS / "orders_revenue.yaml").read_text())
+    out = next(n for n in data["nodes"] if n["id"] == "out")
+    out["params"] = {"format": "table", "table": "revenue", "mode": "merge", "keys": ["region"],
+                     "delete_when": "order_count < 3"}
+    merge = _statements(compile_script(Pipeline.from_dict(data), "spark", SPECS))[-1]
+    assert merge.splitlines()[-1].startswith("WHEN NOT MATCHED")
+    plan = spark._jsparkSession.sessionState().sqlParser().parsePlan(merge)
+    assert "MergeIntoTable" in plan.getClass().getSimpleName()

@@ -84,6 +84,7 @@ class _Port:
     ref_field: str = ""
     ref_table: str = ""    # source fields: foreign key target table
     ref_column: str = ""
+    keytype: str = ""      # target and source fields: PRIMARY KEY, FOREIGN KEY, ...
 
     @property
     def kind(self) -> str | None:
@@ -109,6 +110,7 @@ def _ports(el: ET.Element, tag: str) -> list[_Port]:
             ref_field=(f.get("REF_FIELD") or "").upper(),
             ref_table=(f.get("REFERENCEDTABLE") or "").upper(),
             ref_column=(f.get("REFERENCEDFIELD") or "").upper(),
+            keytype=(f.get("KEYTYPE") or "").upper(),
         ))
     return out
 
@@ -547,6 +549,16 @@ class _MappingConverter:
         a = self.attrs(name, None)
         truncate = a.get("TRUNCATE TARGET TABLE OPTION", "").strip().upper() in ("YES", "1", "TRUE")
         params["mode"] = "overwrite" if truncate else "append"
+        upsert = not truncate and not flat and self.upstream(base) & imp.upserts
+        if upsert:
+            keys = [_slug(f.name) for f in connected if f.keytype == "PRIMARY KEY"]
+            if keys:
+                params.update({"mode": "merge", "keys": keys})
+                self.note(CONVERTED, f"rows are merged on the primary key ({', '.join(keys)}): updated where "
+                                     "they exist, inserted where they don't")
+            else:
+                self.note(REVIEW, "an Update Strategy flags rows for update, but the target has no connected "
+                                  "primary key to merge on, so rows are appended; set mode: merge and keys")
         dialect = _DIALECTS.get((tdef.get("DATABASETYPE") or "").lower())
         for key, hook in (("PRE SQL", "pre_sql"), ("POST SQL", "post_sql")):
             statements = self.hooks(self.subst(a.get(key, "")), dialect, _label(key))
@@ -558,6 +570,8 @@ class _MappingConverter:
         imp.outputs.append(node)
         if truncate:
             self.note(CONVERTED, "the session truncates the target, so rows overwrite it")
+        elif upsert:
+            pass
         elif self.session is None:
             self.note(CONVERTED, "rows are appended, as PowerCenter inserts by default; set mode to overwrite "
                                  "if the session truncates the target (import the session to know)")
@@ -567,6 +581,17 @@ class _MappingConverter:
             self.note(CONVERTED, f"{len(missing)} target column(s) aren't connected and get the database "
                                  f"default: {', '.join(missing)}")
         return {}
+
+    def upstream(self, node: str) -> set[str]:
+        """``node`` and every node it reads from, so far."""
+        inputs = {n["id"]: n["inputs"] for n in self.b.nodes}
+        seen, stack = set(), [node]
+        while stack:
+            n = stack.pop()
+            if n not in seen:
+                seen.add(n)
+                stack += inputs.get(n, [])
+        return seen
 
     def hooks(self, text: str, dialect: str | None, label: str) -> list[str]:
         """Pre/post SQL as neutral statements. PowerCenter separates statements with ';'."""
@@ -1178,19 +1203,25 @@ class _MappingConverter:
         if words <= {"DD_INSERT", "0"}:
             self.note(CONVERTED, "every row is an insert, so no step is needed")
             return dict(refs)
-        if words & {"DD_UPDATE", "DD_DELETE", "1", "2"}:
-            self.note(REVIEW, "flags rows for update or delete; Redcliff targets insert or overwrite, so a "
-                              "MERGE in the target is needed for updates and deletes")
+        deletes = bool(words & {"DD_DELETE", "2"})
+        upserts = bool(words & {"DD_UPDATE", "1"}) and not deletes
+        if deletes:
+            self.note(REVIEW, "flags rows for delete; a merge target with 'delete_when' can delete them, but "
+                              "the flag has to reach the target: set it up by hand")
         base, colmap = self.merge(refs, _slug(name))
         if base is None:
             raise _Manual("nothing is connected to it")
+        node = base
         if words & {"DD_REJECT", "3"}:
             flag = self.expr("expression", text, self.resolver(colmap, ports))
             cond = _keep_unless_rejected(flag)
             node = self.imp.add("filter", [base], {"condition": cond.sql()}, _slug(name), "active")
             self.note(CONVERTED, "rows flagged DD_REJECT are filtered out")
-            return {p: _Col(node, c) for p, c in colmap.items()}
-        return {p: _Col(base, c) for p, c in colmap.items()}
+        if upserts:
+            self.imp.upserts.add(node)
+            self.note(CONVERTED, "rows flagged for insert or update become a merge into the target on its "
+                                 "primary key (an upsert)")
+        return {p: _Col(node, c) for p, c in colmap.items()}
 
 
 def _keep_unless_rejected(flag: exp.Expression) -> exp.Expression:
@@ -1227,6 +1258,7 @@ class _Importer:
         self.dialect_of: dict[str, str | None] = {}
         self.display: dict[str, str] = {}  # flattened mapplet instance -> MAPPLET/INSTANCE
         self.variables: dict[str, str] = {}  # pipeline variables from $$PARAMS -> default value
+        self.upserts: set[str] = set()       # nodes whose rows an Update Strategy flags insert-or-update
         self.synced = 0
 
     def sync(self) -> None:

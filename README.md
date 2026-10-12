@@ -355,7 +355,8 @@ right-hand copy, Redcliff renames that copy before the join, so no value is lost
 | Aggregator | `aggregate`, including `SUM(x, condition)` |
 | Joiner, connected Lookup | `join` (a lookup is de-duplicated by its keys first) |
 | Union | `select` per group, then `union` |
-| Sorter, Update Strategy | nothing, or a distinct `aggregate`, or a `filter` that drops rejected rows |
+| Sorter | nothing, or a distinct `aggregate` |
+| Update Strategy | a `filter` that drops rejected rows; inserts and updates become a merge on the target's primary key |
 | Sequence Generator | `ROW_NUMBER()`, flagged for review |
 | Rank | a `RANK()` window and a `filter`: top or bottom N per group, ties as PowerCenter ranks them |
 | Normalizer | one row per occurrence: a `select` per occurrence, then `union` |
@@ -484,10 +485,10 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 - [x] MCP server, so AI agents can edit pipelines and show a diff before you accept
 - [x] Pull request bot: lineage and data diffs posted on every PR ([`uses: Fullcountr/redcliff@main`](docs/pr-bot.md))
 - [x] Pipeline variables: `${name}` with defaults and `--var` overrides; PowerCenter `$$PARAMS` import as variables, dbt gets `var()`
+- [x] Merge targets (`mode: merge` with `keys` and `delete_when`); PowerCenter Update Strategy upserts import as merges
 
 ### Next
 
-- [ ] MERGE targets (`mode: merge` with keys), so PowerCenter Update Strategy updates and deletes convert
 - [ ] Data quality expectations on any step, compiled to DuckDB checks, dbt tests and Lakeflow `@dp.expect`
 - [ ] A variables panel in the playground, to change a run's values and see the rows change
 - [ ] SSIS package (`.dtsx`) importer

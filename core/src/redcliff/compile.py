@@ -230,8 +230,52 @@ def _views_header(views: list[str]) -> str:
     return f"-- Register these file sources as temp views first:\n{lines}\n"
 
 
-def _write_statement(target: Node, dialect: str, base_dir, blocks: list[str]) -> str:
+def _qualify(neutral: str, table: str) -> exp.Expression:
+    """An expression over the incoming rows, with bare columns qualified by ``table``."""
+    return sqlglot.parse_one(neutral).transform(
+        lambda e: exp.column(e.name, table=table) if isinstance(e, exp.Column) and not e.table else e)
+
+
+def _merge_statement(target: Node, dialect: str, blocks: list[str], columns: list[str] | None) -> str:
+    """MERGE the target's input into its table: update rows whose keys match, insert the rest,
+    and delete matched rows where ``delete_when`` holds."""
     p = target.params
+    if not columns:
+        raise CompileError(f"{target.id}: a merge target needs its input's columns; declare source columns")
+    keys = p["keys"]
+    missing = [k for k in keys if k not in columns]
+    if missing:
+        raise CompileError(f"{target.id}: merge keys {missing} aren't columns of {target.inputs[0]!r}")
+    q = lambda c: _transpile(_ident(c), dialect)  # noqa: E731
+    src = _transpile(_ident(target.inputs[0]), dialect)
+    inner = f"{_with(blocks)}\nSELECT * FROM {src}" if blocks else f"SELECT * FROM {src}"
+    using = "\n".join("  " + line for line in inner.splitlines())
+    on = " AND ".join(f"existing.{q(k)} = incoming.{q(k)}" for k in keys)
+    lines = [f"MERGE INTO {p['table']} AS existing", f"USING (\n{using}\n) AS incoming", f"ON {on}"]
+    delete = p.get("delete_when")
+    if delete:
+        cond = _qualify(delete, "incoming").sql(dialect)
+        lines.append(f"WHEN MATCHED AND {cond} THEN DELETE")
+    updates = [c for c in columns if c not in keys]
+    if updates:
+        lines.append("WHEN MATCHED THEN UPDATE SET " + ", ".join(f"{q(c)} = incoming.{q(c)}" for c in updates))
+    insert_when = f" AND NOT ({_qualify(delete, 'incoming').sql(dialect)})" if delete else ""
+    lines.append(f"WHEN NOT MATCHED{insert_when} THEN INSERT ({', '.join(q(c) for c in columns)}) "
+                 f"VALUES ({', '.join(f'incoming.{q(c)}' for c in columns)})")
+    head = f"-- {target.id}: target (merge on {', '.join(keys)})\n"
+    if dialect == "duckdb":  # the first run creates the table
+        head += (f"CREATE TABLE IF NOT EXISTS {p['table']} AS\n{inner}\nLIMIT 0;\n\n"
+                 f"-- {target.id}: merge\n")
+    else:
+        head += "-- Spark runs MERGE on tables with row-level updates: Delta Lake or Iceberg.\n"
+    return head + "\n".join(lines)
+
+
+def _write_statement(target: Node, dialect: str, base_dir, blocks: list[str],
+                     columns: list[str] | None = None) -> str:
+    p = target.params
+    if p.get("mode") == "merge":
+        return _merge_statement(target, dialect, blocks, columns)
     src = _transpile(_ident(target.inputs[0]), dialect)
     query = f"SELECT * FROM {src}"
     mode = p.get("mode", "overwrite")
@@ -290,12 +334,13 @@ def compile_script(pipeline: Pipeline, dialect: str = "duckdb", base_dir=None) -
         raise CompileError("the pipeline has no target to write")
     statements: list[str] = []
     all_views: list[str] = []
+    cols = infer_columns(pipeline)
     for target in targets:
         blocks, views = _cte_chain(pipeline, _ancestors(pipeline, target.id), dialect, base_dir)
         all_views += [v for v in views if v not in all_views]
         pre, post = _hooks(target, dialect)
         statements += pre
-        statements.append(_write_statement(target, dialect, base_dir, blocks))
+        statements.append(_write_statement(target, dialect, base_dir, blocks, cols.get(target.inputs[0])))
         statements += post
     header = f"-- Redcliff pipeline: {pipeline.name} ({dialect})\n" + variables_note(variables, "-- ")
     if dialect == "duckdb":
@@ -355,7 +400,9 @@ def compile_pyspark(pipeline: Pipeline, base_dir=None) -> str:
             for sql in p.get("pre_sql") or []:
                 lines.append(f"spark.sql({_statement(sql, 'spark')!r})  # pre-SQL")
             writer = f'{ins[0]}.write.mode({p.get("mode", "overwrite")!r})'
-            if p["format"] == "table":
+            if p.get("mode") == "merge":
+                lines += _pyspark_merge(node, ins[0])
+            elif p["format"] == "table":
                 lines.append(f"{writer}.saveAsTable({p['table']!r})")
             else:
                 if p["format"] == "csv":
@@ -364,6 +411,25 @@ def compile_pyspark(pipeline: Pipeline, base_dir=None) -> str:
             for sql in p.get("post_sql") or []:
                 lines.append(f"spark.sql({_statement(sql, 'spark')!r})  # post-SQL")
     return "\n".join(lines) + "\n"
+
+
+def _pyspark_merge(node: Node, df: str) -> list[str]:
+    """DataFrame.mergeInto (Spark 4): needs a table format with row-level updates (Delta, Iceberg)."""
+    p = node.params
+    table = p["table"]
+    name = table.split(".")[-1]
+    on = " AND ".join(f"{name}.{k} = incoming.{k}" for k in p["keys"])
+    out = ["# Spark runs MERGE on tables with row-level updates: Delta Lake or Iceberg.",
+           f'({df}.alias("incoming")', f"    .mergeInto({table!r}, F.expr({on!r}))"]
+    if p.get("delete_when"):
+        cond = _qualify(p["delete_when"], "incoming").sql("spark")
+        out.append(f"    .whenMatched(F.expr({cond!r})).delete()")
+        out.append("    .whenMatched().updateAll()")
+        out.append(f"    .whenNotMatched(F.expr({f'NOT ({cond})'!r})).insertAll()")
+    else:
+        out += ["    .whenMatched().updateAll()", "    .whenNotMatched().insertAll()"]
+    out.append("    .merge())")
+    return out
 
 
 def _dataframe(node: Node, ins: list[str], cols: dict[str, Columns]) -> str:

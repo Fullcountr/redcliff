@@ -90,7 +90,14 @@ def compile_lakeflow(pipeline: Pipeline, base_dir: str | Path | None = None,
                       f'    """{node.id}: source"""', f"    return {body}"]
         elif t == "target":
             src = read(node.inputs[0])
-            if p["format"] == "table":
+            if p.get("mode") == "merge":
+                table = f"{p['table'].split('.')[-1]}_incoming"
+                comment = (f"the rows to merge into {p['table']} on {', '.join(p['keys'])}; a declarative pipeline "
+                           "recomputes datasets, so the MERGE itself runs as a job task")
+                job_notes.append(f"{node.id}: after the pipeline, MERGE {table} INTO {p['table']} on "
+                                 f"{', '.join(p['keys'])}" + (f", deleting matched rows where {p['delete_when']}"
+                                                              if p.get("delete_when") else ""))
+            elif p["format"] == "table":
                 table = p["table"]
                 comment = "rows are appended in Redcliff; a materialized view recomputes them" \
                     if p.get("mode") == "append" else None

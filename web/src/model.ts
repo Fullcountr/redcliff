@@ -65,8 +65,13 @@ export function summarize(step: Step): string {
       return String(p.format === "table" ? p.table : p.path ?? "");
     case "target": {
       const hooks = [p.pre_sql && "pre-SQL", p.post_sql && "post-SQL"].filter(Boolean).join(", ");
+      const where = String(p.format === "table" ? p.table : p.path ?? "");
+      if (p.mode === "merge") {
+        const keys = ((p.keys as string[] | undefined) ?? []).join(", ");
+        return `merge into ${where} on ${keys}${hooks ? ` + ${hooks}` : ""}`;
+      }
       const how = p.mode === "append" ? "append to" : "write";
-      return `${how} ${String(p.format === "table" ? p.table : p.path ?? "")}${hooks ? ` + ${hooks}` : ""}`;
+      return `${how} ${where}${hooks ? ` + ${hooks}` : ""}`;
     }
     case "filter":
       return String(p.condition ?? "");

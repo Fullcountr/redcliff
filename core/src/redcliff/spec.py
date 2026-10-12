@@ -30,7 +30,7 @@ VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 NODE_TYPES = ("source", "filter", "select", "derive", "join", "aggregate", "union", "sql", "target")
 FORMATS = ("csv", "parquet", "table")
 JOIN_TYPES = ("inner", "left", "right", "full")
-WRITE_MODES = ("overwrite", "append")
+WRITE_MODES = ("overwrite", "append", "merge")
 
 # (minimum inputs, maximum inputs or None for unlimited)
 INPUT_COUNTS: dict[str, tuple[int, int | None]] = {
@@ -196,8 +196,24 @@ def _check_io(issues: list[Issue], nid: str, params: dict, writing: bool) -> Non
     if not isinstance(params.get(key), str) or not params[key].strip():
         issues.append(Issue(nid, f"format '{fmt}' needs a '{key}'"))
     if writing:
-        if params.get("mode", "overwrite") not in WRITE_MODES:
+        mode = params.get("mode", "overwrite")
+        if mode not in WRITE_MODES:
             issues.append(Issue(nid, f"'mode' must be one of {list(WRITE_MODES)}"))
+        if mode == "merge":
+            if fmt != "table":
+                issues.append(Issue(nid, "'mode: merge' needs a table target"))
+            keys = params.get("keys")
+            if not isinstance(keys, list) or not keys:
+                issues.append(Issue(nid, "'mode: merge' needs 'keys': the columns that identify a row"))
+            else:
+                for k in keys:
+                    _check_name(issues, nid, "key", k)
+            if params.get("delete_when") is not None:
+                _check_expr(issues, nid, "'delete_when'", params["delete_when"])
+        else:
+            for key in ("keys", "delete_when"):
+                if key in params:
+                    issues.append(Issue(nid, f"'{key}' is only used with 'mode: merge'"))
         for hook in ("pre_sql", "post_sql"):
             statements = params.get(hook)
             if statements is None:

@@ -339,13 +339,41 @@ def test_reusable_transformation_from_the_folder():
     assert r.pipeline.node("exp_upper").params == {"columns": {"status": "UPPER(status)"}}
 
 
-def test_update_strategy_with_updates_needs_review():
-    upd = transform("UPD_X", "Update Strategy", [port("ORDER_ID:decimal")],
-                    {"Update Strategy Expression": "DD_UPDATE"})
-    r = simple([upd], [("UPD_X", "TRANSFORMATION", "Update Strategy"), ("T", "TARGET", "Target Definition")],
-               ["SQ_ORDERS.ORDER_ID -> UPD_X.ORDER_ID", "UPD_X.ORDER_ID -> T.ORDER_ID"], [target("T", "ORDER_ID:decimal")])
-    item = next(i for i in r.scorecard.items if i.name == "UPD_X")
-    assert item.status == "review" and "MERGE" in item.notes[0]
+def keyed_target(name: str) -> str:
+    return (f'<TARGET NAME="{name}" DATABASETYPE="Oracle">'
+            + field("TARGETFIELD", "ORDER_ID:decimal", KEYTYPE="PRIMARY KEY")
+            + field("TARGETFIELD", "AMOUNT:decimal", KEYTYPE="NOT A KEY") + "</TARGET>")
+
+
+def upsert_mapping(expression: str, tgt: str):
+    upd = transform("UPD_X", "Update Strategy", [port("ORDER_ID:decimal"), port("AMOUNT:decimal")],
+                    {"Update Strategy Expression": expression})
+    return simple([upd], [("UPD_X", "TRANSFORMATION", "Update Strategy"), ("T", "TARGET", "Target Definition")],
+                  ["SQ_ORDERS.ORDER_ID -> UPD_X.ORDER_ID", "SQ_ORDERS.AMOUNT -> UPD_X.AMOUNT",
+                   "UPD_X.ORDER_ID -> T.ORDER_ID", "UPD_X.AMOUNT -> T.AMOUNT"], [tgt])
+
+
+def test_update_strategy_upserts_become_a_merge(con):
+    r = upsert_mapping("IIF(AMOUNT > 100, DD_UPDATE, DD_INSERT)", keyed_target("T"))
+    items = {i.name: i for i in r.scorecard.items}
+    assert items["UPD_X"].status == items["T"].status == "converted"
+    params = r.pipeline.node("t").params
+    assert (params["mode"], params["keys"]) == ("merge", ["order_id"])
+    con.execute("CREATE OR REPLACE TABLE t (order_id INT, amount DECIMAL(10,2))")
+    con.execute("INSERT INTO t VALUES (1, 0.00), (99, 9.00)")
+    con.execute(compile_script(r.pipeline, "duckdb"))
+    got = con.sql("SELECT * FROM t ORDER BY order_id").fetchall()
+    assert got[0] == (1, Decimal("120.50")) and got[-1] == (99, Decimal("9.00")) and len(got) == 9
+
+
+def test_update_strategy_without_keys_or_with_deletes_needs_review():
+    r = upsert_mapping("DD_UPDATE", target("T", "ORDER_ID:decimal", "AMOUNT:decimal"))
+    items = {i.name: i for i in r.scorecard.items}
+    assert items["T"].status == "review" and "no connected primary key" in " ".join(items["T"].notes)
+    assert r.pipeline.node("t").params["mode"] == "append"
+    r = upsert_mapping("IIF(AMOUNT < 50, DD_DELETE, DD_UPDATE)", keyed_target("T"))
+    assert next(i for i in r.scorecard.items if i.name == "UPD_X").status == "review"
+    assert r.pipeline.node("t").params["mode"] == "append"
 
 
 def test_master_column_clash_in_a_joiner_is_renamed(con):

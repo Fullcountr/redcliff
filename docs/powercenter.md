@@ -72,7 +72,7 @@ playground's Migration tab.
 | Router | one `filter` per group that's used | the DEFAULT group is `NOT COALESCE(cond, FALSE)` for every other group, so NULLs land there, as in PowerCenter |
 | Union | `select` per input group + `union` | ports matched by position |
 | Sorter | nothing, or `aggregate` when Distinct | row order doesn't matter to set-based steps |
-| Update Strategy | nothing, or a `filter` that drops `DD_REJECT` rows | `DD_UPDATE` / `DD_DELETE` are **review**: they need a MERGE in the target |
+| Update Strategy | nothing, a `filter` that drops `DD_REJECT` rows, and for `DD_UPDATE` a merge target | rows flagged insert or update are merged on the target's primary key (an upsert); with no primary key, or with `DD_DELETE`, it's **review** |
 | Sequence Generator | a `ROW_NUMBER()` column where it's used | **review**: numbers restart every run |
 | Rank | `derive` with `RANK() OVER (PARTITION BY <group by ports> ORDER BY <rank port>)` + `filter` on it | top or bottom N per group; ties share a rank index and the next one is skipped, as PowerCenter's RANKINDEX does; NULLs rank last; ranking a string port is **review** (collations differ) |
 | Normalizer | one `derive` + `select` per occurrence, then `union` | `SALES_in1`…`SALES_in4` (or `SALES1`…) feed `SALES`; `GCID_SALES` numbers the occurrence; a connected `GK_` generated key is **manual** |

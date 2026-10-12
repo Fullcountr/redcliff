@@ -183,6 +183,15 @@ def build_graph(pipeline: Pipeline) -> ColumnGraph:
                 for use in analyze_expression(p["condition"]):
                     for src in _resolve(use, node, cols, issues):
                         graph.dataset_edges.append(DatasetEdge(src, nid, "FILTER"))
+            elif p.get("mode") == "merge":
+                inp = node.inputs[0]
+                for k in p.get("keys") or []:
+                    if _name_check(node, k, inp, cols, issues):
+                        graph.dataset_edges.append(DatasetEdge(Ref(inp, k), nid, "JOIN"))  # matched on it
+                if p.get("delete_when"):
+                    for use in analyze_expression(p["delete_when"]):
+                        for src in _resolve(use, node, cols, issues):
+                            graph.dataset_edges.append(DatasetEdge(src, nid, "FILTER"))
 
         elif t == "select":
             inp = node.inputs[0]

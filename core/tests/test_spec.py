@@ -124,7 +124,7 @@ def test_all_issues_are_collected():
         (spec(src={"params": {"format": "xml", "path": "a"}}), "'format' must be one of"),
         (spec(src={"params": {"format": "csv"}}), "format 'csv' needs a 'path'"),
         (spec(out={"params": {"format": "table"}}), "format 'table' needs a 'table'"),
-        (spec(out={"params": {"format": "csv", "path": "o", "mode": "merge"}}), "'mode' must be one of"),
+        (spec(out={"params": {"format": "csv", "path": "o", "mode": "upsert"}}), "'mode' must be one of"),
         (spec(src={"params": {"format": "csv", "path": "a", "columns": {"x": ""}}}), "column 'x' needs a type"),
     ],
 )

@@ -188,8 +188,13 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
         else:
             p = node.params
             config: list[str] = []
-            if p["format"] == "table":
+            if p.get("mode") == "merge":
+                strategy = "merge" if adapter in ("databricks", "spark", "snowflake", "bigquery") else "delete+insert"
+                config += ["materialized='incremental'", f"unique_key={list(p['keys'])!r}",
+                           f"incremental_strategy='{strategy}'"]
+            elif p["format"] == "table":
                 config.append("materialized='incremental'" if p.get("mode") == "append" else "materialized='table'")
+            if p["format"] == "table":
                 if model_name[node.id] != _table_name(p["table"])[1]:
                     config.append(f"alias='{_table_name(p['table'])[1]}'")
                 if _table_name(p["table"])[0]:
@@ -207,9 +212,14 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
                     config.append(f"{hook}={statements!r}")
             note = "" if p["format"] == "table" or adapter == "duckdb" else \
                 f"-- Redcliff writes {p['path']}; dbt materializes a table here. Unload it with your platform's tools.\n"
+            body = f"SELECT * FROM {relation(node.inputs[0])}\n"
+            if p.get("mode") == "merge" and p.get("delete_when"):
+                cond = sqlglot.parse_one(p["delete_when"]).sql(dialect)
+                note += (f"-- Redcliff deletes matched rows where {cond}; dbt's incremental merge doesn't delete,\n"
+                         "-- so those rows are left out here. Delete them with a post_hook or a separate job.\n")
+                body += f"WHERE NOT ({cond})\n"
             files[f"models/{model_name[node.id]}.sql"] = (
-                f"-- {node.id}: target\n{note}{{{{ config({', '.join(config)}) }}}}\n\n"
-                f"SELECT * FROM {relation(node.inputs[0])}\n")
+                f"-- {node.id}: target\n{note}{{{{ config({', '.join(config)}) }}}}\n\n{body}")
             documented = node.inputs[0]
         docs.append(f"  - name: {model_name[node.id]}")
         docs.append(f"    description: {_yaml_str(f'Redcliff step {node.id} ({node.type}).')}")

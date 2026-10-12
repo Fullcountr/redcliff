@@ -40,7 +40,7 @@ nodes:                        # required, at least one
 | `aggregate` | 1 | `group_by`: list of names, `measures`: name: SQL aggregate (optional when grouping, which is `SELECT DISTINCT`) | group-by columns then measures |
 | `union` | 2+ | `distinct` (false default) | columns of the first input, matched by position |
 | `sql` | 0+ | `query`: one SELECT that reads its inputs by node id | the SELECT's columns |
-| `target` | 1 | `format`, `path` or `table`, `mode` (overwrite default, append), optional `pre_sql` and `post_sql` (lists of statements) | none (writes data) |
+| `target` | 1 | `format`, `path` or `table`, `mode` (overwrite default, append, merge), optional `pre_sql` and `post_sql` (lists of statements); `mode: merge` takes `keys` and an optional `delete_when` | none (writes data) |
 
 The `sql` node is the escape hatch for logic without a node type yet (ORDER BY, LIMIT,
 subqueries in WHERE, QUALIFY). The SQL importer uses it so nothing is ever dropped silently.
@@ -59,6 +59,33 @@ Rules the compiler follows:
 
 Declaring `columns` on sources is optional but recommended: lineage and early error checks
 work best when Redcliff knows each source's schema.
+
+## Merge targets
+
+`mode: merge` updates the table's rows whose `keys` match an incoming row, inserts the rest, and
+leaves rows that don't appear alone. `delete_when` deletes matched rows where it holds (and doesn't
+insert unmatched ones):
+
+```yaml
+- id: out
+  type: target
+  inputs: [revenue_by_region]
+  params:
+    format: table
+    table: revenue
+    mode: merge
+    keys: [region]
+    delete_when: order_count = 0
+```
+
+| Output | Merge |
+| --- | --- |
+| DuckDB SQL | `CREATE TABLE IF NOT EXISTS` (the first run), then `MERGE INTO` |
+| Spark SQL, PySpark | `MERGE INTO` / `DataFrame.mergeInto`; Spark needs a table format with row-level updates, such as Delta Lake or Iceberg |
+| dbt | an incremental model with `unique_key`; `merge` strategy, or `delete+insert` on DuckDB, Postgres and Redshift. dbt's merge doesn't delete, so `delete_when` rows are left out, with a comment |
+| Lakeflow | a materialized view of the incoming rows, and a job task note for the MERGE |
+
+The incoming rows must have one row per key, as every engine's MERGE requires.
 
 ## Variables
 
