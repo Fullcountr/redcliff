@@ -1,6 +1,6 @@
 import * as yaml from "js-yaml";
 import {
-  ArrowRight, Check, CircleAlert, Code2, Copy, Download, FileText, Gauge, Keyboard, MousePointerClick,
+  ArrowRight, Check, CircleAlert, Code2, Copy, Download, FileText, Gauge, GitCompare, Keyboard, MousePointerClick,
   Rows3, SlidersHorizontal, Table2, Trash2, TriangleAlert, Unlink, Waypoints, X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -10,8 +10,9 @@ import type { Analysis, CheckRun, Impact, Scorecard, ScoreItem, ScoreStatus, Spe
 import { STEP_LABELS, summarize } from "../model";
 import { STEP_ICONS, StepIcon, highlight } from "../ui";
 import { zip } from "../zip";
+import { ChangesPanel } from "./ChangesPanel";
 
-export type Tab = "step" | "data" | "code" | "spec" | "migration";
+export type Tab = "step" | "data" | "code" | "spec" | "changes" | "migration";
 
 type Props = {
   tab: Tab;
@@ -33,6 +34,8 @@ type Props = {
   onDeleteStep: (id: string) => void;
   onAddStep: (type: StepType) => void;
   onClearFocus: () => void;
+  baseline: Spec | null;
+  onRebase: () => void;
 };
 
 const ADDABLE: StepType[] = ["filter", "derive", "select", "aggregate", "join", "union", "sql", "target"];
@@ -44,6 +47,7 @@ export function Inspector(props: Props) {
     { id: "data", label: "Data", icon: Table2 },
     { id: "code", label: "Code", icon: Code2 },
     { id: "spec", label: "Spec", icon: FileText },
+    { id: "changes", label: "Changes", icon: GitCompare },
   ];
   if (scorecard) tabs.push({ id: "migration", label: "Migration", icon: Gauge });
   return (
@@ -71,6 +75,8 @@ export function Inspector(props: Props) {
         {tab === "data" && <DataPanel {...props} />}
         {tab === "code" && <CodePanel {...props} />}
         {tab === "spec" && <SpecPanel {...props} />}
+        {tab === "changes" && <ChangesPanel baseline={props.baseline} spec={props.spec} engineReady={props.engineReady}
+          ready={props.ready} onRebase={props.onRebase} />}
         {tab === "migration" && scorecard && <MigrationPanel {...props} scorecard={scorecard} />}
       </div>
     </aside>

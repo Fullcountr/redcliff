@@ -63,6 +63,8 @@ function uniqueId(spec: Spec, base: string): string {
 export default function App() {
   const [samples, setSamples] = useState<Samples | null>(null);
   const [spec, setSpec] = useState<Spec | null>(null);
+  // The pipeline as loaded: the Changes tab compares edits with it.
+  const [baseline, setBaseline] = useState<Spec | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [eng, setEng] = useState<EngineState>({ state: "loading" });
   const [dataReady, setDataReady] = useState(false);
@@ -113,6 +115,7 @@ export default function App() {
       setSamples({ ...s, precomputed });
       const shared = await specFromHash(window.location.hash);
       setSpec(shared ?? s.specs.orders_revenue);
+      setBaseline(shared ?? s.specs.orders_revenue);
       if (shared) setExample("");
       // Python first, with the whole connection to itself; DuckDB (previews) after.
       await engineReady.catch(() => undefined);
@@ -247,7 +250,7 @@ export default function App() {
   // ---------------------------------------------------------------- spec edits
   const replaceSpec = useCallback((next: Spec, keepPositions = true) => {
     setSpec(next);
-    if (!keepPositions) setPositions({});
+    if (!keepPositions) { setPositions({}); setBaseline(next); }
     setPinned(null);
     setHovered(null);
   }, []);
@@ -622,6 +625,8 @@ export default function App() {
           tab={tab}
           onTab={setTab}
           spec={spec}
+          baseline={baseline}
+          onRebase={() => setBaseline(spec)}
           analysis={analysis}
           selected={selected}
           impact={impact}

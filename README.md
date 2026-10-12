@@ -120,7 +120,9 @@ from query logs after the fact.
 <td valign="top">
 
 **Know the blast radius before you change anything.** Click a column to see which values would
-change, which steps' rows would change, and which steps would break if you renamed it.
+change, which steps' rows would change, and which steps would break if you renamed it. After an
+edit, the **Changes** tab shows what it did: steps, lineage, rows before and after, and the spec
+side by side, the same report the pull request bot posts.
 
 </td>
 </tr>
@@ -328,6 +330,11 @@ lineage format:
 **Blast radius** follows those edges forward. A rename "breaks" a step when that step names the
 column, including a same-named copy passed down from upstream.
 
+**Run events.** `redcliff run pipeline.yaml --openlineage URL` sends OpenLineage START and COMPLETE
+(or FAIL) events with each target's schema and column lineage, so a catalog such as
+[Marquez](https://marquezproject.ai/) sees every run. Give a file path instead of a URL to append
+the events as JSON lines; set `OPENLINEAGE_API_KEY` for an endpoint that needs a token.
+
 ### The SQL importer
 
 | SQL | Becomes |
@@ -392,7 +399,7 @@ and integer division. See [`docs/ssis.md`](docs/ssis.md).
 | `redcliff compile pipeline.yaml --to spark\|pyspark\|duckdb [--node ID]` | generate code |
 | `redcliff compile pipeline.yaml --to dbt\|lakeflow -o DIR` | generate a dbt project or a Lakeflow Declarative Pipeline ([details](docs/outputs.md)) |
 | `redcliff lineage pipeline.yaml [--column N.C \| --impact N.C \| --openlineage N]` | lineage |
-| `redcliff run pipeline.yaml [--db file.duckdb] [--node ID]` | run or preview locally with DuckDB |
+| `redcliff run pipeline.yaml [--db file.duckdb] [--node ID] [--openlineage FILE_OR_URL]` | run or preview locally with DuckDB; send OpenLineage run events |
 | `redcliff test pipeline.yaml [--node ID]` | run the data quality expectations ([details](docs/spec.md#expectations)) |
 | `redcliff trace pipeline.yaml STEP [--where COND]` | row-level trace: each row of a step with the source rows behind it |
 | `redcliff diff old.yaml new.yaml [--data]` or `redcliff diff --git REF` | what a change does: steps, columns, lineage and rows ([details](docs/pr-bot.md)) |
@@ -446,7 +453,7 @@ flowchart LR
 | Spark | generated Spark SQL and PySpark run on real Spark and must match DuckDB, row for row; Informatica expressions too |
 | dbt | every example becomes a dbt project, `dbt build` runs it with dbt-duckdb (seeds, hooks, file targets) and every target must match DuckDB |
 | Lakeflow | every example becomes a Lakeflow Declarative Pipeline, `spark-pipelines run` runs it on local Spark and every materialized view must match DuckDB |
-| Browser | headless Chromium drives the real app: boot, hover, blast radius, SQL and PowerCenter import, scorecard, preview, edit, share, phone layout; after every deploy it runs again against the live site |
+| Browser | headless Chromium drives the real app: boot, hover, blast radius, SQL and PowerCenter import, scorecard, preview, edit, the Changes tab, share, data models, phone layout; after every deploy it runs again against the live site |
 
 CI runs all of it on every push, including the browser test and a real Spark: the generated
 Spark SQL (queries and full scripts that write tables) and PySpark scripts run on a local Spark 4
@@ -505,8 +512,10 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 - [x] Data quality expectations on any step: `redcliff test`, results on the canvas, dbt tests and Lakeflow expectations
 - [x] SSIS package (`.dtsx`) importer, with a scorecard
 - [x] `pip install redcliff` from PyPI, released by a tag-triggered workflow
+- [x] OpenLineage run events from `redcliff run`, so a catalog such as Marquez sees each run with its column lineage
+- [x] A Changes tab in the playground: a side-by-side diff, the same report the pull request bot posts
 
-### Next: data models ([design](docs/modeling.md))
+### Data models ([design](docs/modeling.md))
 
 Add a file, get a model: Redcliff profiles it, proposes a Kimball or Data Vault 2.0 model, you
 adjust it on the canvas, and the pipelines that load it are generated from it.
@@ -524,9 +533,7 @@ adjust it on the canvas, and the pipelines that load it are generated from it.
 
 - [ ] Legacy imports (SQL, PowerCenter, SSIS) mapped onto a proposed model
 - [ ] VS Code extension: the canvas and lineage next to the spec file
-- [ ] OpenLineage run events from `redcliff run`, so a catalog such as Marquez sees each run with its column lineage
 - [ ] Talend and IBM DataStage importers
-- [ ] A side-by-side diff view in the playground, the same report the pull request bot posts
 
 ---
 

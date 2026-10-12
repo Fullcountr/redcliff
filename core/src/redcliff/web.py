@@ -15,7 +15,7 @@ from redcliff.importer import import_sql as _import_sql
 from redcliff.lineage import Ref, blast_radius, build_graph, trace_to_sources
 from redcliff.powercenter import import_powercenter as _import_powercenter
 from redcliff.powercenter import mapping_names
-from redcliff.spec import Pipeline, validate
+from redcliff.spec import Pipeline, bind, validate
 
 
 def _load(spec: Any) -> Pipeline:
@@ -271,3 +271,31 @@ def model_load_pipeline(model: Any) -> dict[str, Any]:
 
     pipeline = model_pipeline(_model(model))
     return {"spec": pipeline.to_dict(), "targets": [n.id for n in pipeline.nodes if n.type == "target"]}
+
+
+@_wrap
+def diff(base: Any, head: Any) -> dict[str, Any]:
+    """What a change does (the pull request bot's report) plus, per target in both versions, the DuckDB
+    queries the browser runs to count rows before and after, and the rows added and removed."""
+    from redcliff.columns import infer_columns
+    from redcliff.diff import diff_pipelines
+
+    b, h = _browser_paths(_load(base)), _browser_paths(_load(head))
+    d = diff_pipelines(b, h)
+    queries = []
+    if not d.issues:
+        b_cols, h_cols = infer_columns(bind(b)), infer_columns(bind(h))
+        b_targets = {n.id: n for n in b.nodes if n.type == "target"}
+        for t in (n for n in h.nodes if n.type == "target"):
+            if t.id not in b_targets:
+                continue
+            try:
+                queries.append({
+                    "target": t.id,
+                    "base": compile_query(b, b_targets[t.id].inputs[0], "duckdb"),
+                    "head": compile_query(h, t.inputs[0], "duckdb"),
+                    "comparable": b_cols.get(b_targets[t.id].inputs[0]) == h_cols.get(t.inputs[0]) is not None,
+                })
+            except Exception:  # noqa: BLE001 - a target that doesn't compile simply isn't compared
+                continue
+    return {"summary": d.summary(), "empty": d.empty, **d.to_dict(), "queries": queries}

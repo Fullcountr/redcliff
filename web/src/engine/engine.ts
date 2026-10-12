@@ -54,6 +54,7 @@ export const engine = {
   importSsis: (xml: string) => call<ImportResult>("import_ssis", xml),
   importPowercenter: (xml: string, params?: string) => call<ImportResult>("import_powercenter", xml, null, params || null),
   impact: (spec: Spec, node: string, column: string) => call<Impact>("impact", json(spec), node, column),
+  diff: (base: Spec, head: Spec) => call<Record<string, unknown>>("diff", json(base), json(head)),
   modelAnalyze: (model: DataModel) => call<ModelAnalysis>("model_analyze", JSON.stringify(model)),
   modelExport: (model: DataModel, fmt: ModelExport, dialect?: string) =>
     call<{ code: string }>("model_export", JSON.stringify(model), fmt, dialect ?? null),

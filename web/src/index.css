@@ -968,3 +968,15 @@ td.rowno { color: var(--text-3); }
 .attr-table .why { font-size: 11px; margin-top: 2px; }
 .pick-list { list-style: none; margin: 6px 0 10px; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
 .pick-list label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+
+/* Changes tab: the spec before and after, side by side */
+.side-by-side { border: 1px solid var(--line); border-radius: 6px; overflow: auto; max-height: 420px; }
+.sbs-row { display: grid; grid-template-columns: 1fr 1fr; }
+.sbs-cell { margin: 0; padding: 0 6px; font-size: 11px; line-height: 1.5; font-family: var(--font-mono); white-space: pre; overflow-x: auto; min-width: 0; }
+.sbs-cell.left { border-right: 1px solid var(--line); }
+.sbs-row.del .left, .sbs-row.mod .left { background: var(--bad-soft); }
+.sbs-row.add .right, .sbs-row.mod .right { background: var(--ok-soft); }
+.sbs-row.mod .left, .sbs-row.mod .right { box-shadow: inset 2px 0 var(--ochre-soft); }
+.sbs-row.same .sbs-cell { color: var(--text-2); }
+.sbs-skip { padding: 2px 6px; font-size: 11px; color: var(--text-2); background: var(--line); text-align: center; }
+.sbs-row:not(.same) .sbs-cell { white-space: pre-wrap; overflow-wrap: anywhere; }

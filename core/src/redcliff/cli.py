@@ -213,7 +213,31 @@ def cmd_run(args) -> int:
             return 1
     for target in (n for n in pipeline.nodes if n.type == "target" and n.params["format"] != "table"):
         (base / target.params["path"]).parent.mkdir(parents=True, exist_ok=True)
-    con.execute(compile_script(pipeline, "duckdb", base_dir=base))
+    emitter = None
+    if args.openlineage:
+        import os
+
+        from redcliff.openlineage import Emitter, run_event
+
+        emitter = Emitter(args.openlineage, api_key=os.environ.get("OPENLINEAGE_API_KEY"))
+
+        def emit(kind: str, error: str | None = None) -> None:
+            try:
+                emitter.send(run_event(pipeline, kind, emitter.run_id, base, args.namespace, error))
+            except Exception as e:  # noqa: BLE001 - lineage must never fail the run
+                _err(f"warning: couldn't send the OpenLineage {kind} event: {e}")
+
+        emit("START")
+    try:
+        con.execute(compile_script(pipeline, "duckdb", base_dir=base))
+    except duckdb.Error as e:
+        message = str(e).splitlines()[0]
+        if emitter:
+            emit("FAIL", message)
+        _err(f"error: the run failed: {message}")
+        return 1
+    if emitter:
+        emit("COMPLETE")
     targets = [n.params.get("table") or n.params.get("path") for n in pipeline.nodes if n.type == "target"]
     print(f"ran {pipeline.name}: wrote {', '.join(targets)}")
     return 0
@@ -609,6 +633,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--node", help="preview one node's rows instead of writing targets")
     p.add_argument("--limit", type=int, default=20)
     p.add_argument("--skip-checks", action="store_true", help="write even if an expectation fails")
+    p.add_argument("--openlineage", metavar="FILE_OR_URL",
+                   help="send OpenLineage run events (START, COMPLETE or FAIL, with column lineage): append them to a "
+                        "file as JSON lines, or POST them to a URL such as http://localhost:5000/api/v1/lineage "
+                        "(a bearer token from OPENLINEAGE_API_KEY)")
+    p.add_argument("--namespace", default="redcliff", help="OpenLineage namespace for the job and table datasets")
     p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("test", help="run the pipeline's expectations (data quality checks) in DuckDB")

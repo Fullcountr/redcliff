@@ -166,6 +166,15 @@ await step("editing a step updates the pipeline", async () => {
   await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="shipped"] .step-rows')?.textContent === "5 rows", null, { timeout: 30000 });
 });
 
+await step("the Changes tab shows what an edit does, side by side", async () => {
+  await page.getByRole("tab", { name: "Changes" }).click();
+  await page.waitForFunction(() => /1 step changed/.test(document.querySelector('[data-testid="changes-summary"]')?.textContent ?? ""), null, { timeout: 30000 });
+  await page.waitForSelector('[data-testid="changes-rows"]', { timeout: 30000 });
+  assert.ok(await page.locator('[data-testid="changes-diff"] .sbs-row.mod').count() >= 1);
+  await shot(page, "05b-changes");
+  await page.getByRole("tab", { name: "Step" }).click();
+});
+
 await step("a broken step is flagged, not fatal", async () => {
   const box = page.locator("textarea.code-input");
   await box.fill("condition: amout > 50");
