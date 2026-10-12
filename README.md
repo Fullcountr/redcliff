@@ -17,6 +17,11 @@
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: alpha">
 </p>
 
+<p align="center">
+  <a href="https://fullcountr.github.io/redcliff/"><strong>Try it live →</strong></a>
+  &nbsp;·&nbsp; no install, no sign-up; your data never leaves the tab
+</p>
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/trace-dark.png">
   <img src="docs/images/trace-light.png" alt="The Redcliff playground. Hovering the revenue column traces it in red back through an aggregate, a join and a filter to orders.amount, while unrelated steps fade.">
@@ -43,7 +48,15 @@ this page. Stop at whichever layer answers your question:
 
 ## Surface: try it in a minute
 
-**In the browser** (the whole engine runs locally; nothing is sent anywhere):
+**In the browser:** open the [live playground](https://fullcountr.github.io/redcliff/). The
+first visit downloads the engine (Python and DuckDB compiled to WebAssembly, about 50 MB before
+compression, cached after that), so give it a moment. Then everything runs in the tab and
+nothing is sent anywhere.
+
+A sample pipeline loads with live row counts. Hover any column. Click one. Then press
+**Import SQL** and import the legacy Teradata job that's already filled in.
+
+**Run it yourself:**
 
 ```bash
 git clone https://github.com/Fullcountr/redcliff.git
@@ -52,8 +65,7 @@ npm install
 npm run dev        # needs Node 20+ and Python 3 with pip (used once, to vendor the engine)
 ```
 
-Open the printed URL. A sample pipeline loads with live row counts. Hover any column. Click one.
-Then press **Import SQL** and import the legacy Teradata job that's already filled in.
+Then open the printed URL.
 
 **On the command line:**
 

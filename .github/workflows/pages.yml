@@ -42,3 +42,24 @@ jobs:
           path: web/dist
       - id: deploy
         uses: actions/deploy-pages@v4
+
+  # Runs the browser test against the site people actually visit, not a local copy.
+  verify-live:
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Browser end-to-end test on the live site
+        working-directory: web/e2e
+        env:
+          APP_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: |
+          npm ci
+          npx playwright-core install --with-deps chromium
+          for i in $(seq 1 30); do curl -sf "$APP_URL" > /dev/null && break; sleep 5; done
+          node playground.e2e.mjs
