@@ -378,6 +378,7 @@ pipeline, connected through the tables its mappings write and read. The full lis
 | `redcliff lineage pipeline.yaml [--column N.C \| --impact N.C \| --openlineage N]` | lineage |
 | `redcliff run pipeline.yaml [--db file.duckdb] [--node ID]` | run or preview locally with DuckDB |
 | `redcliff trace pipeline.yaml STEP [--where COND]` | row-level trace: each row of a step with the source rows behind it |
+| `redcliff diff old.yaml new.yaml [--data]` or `redcliff diff --git REF` | what a change does: steps, columns, lineage and rows ([details](docs/pr-bot.md)) |
 
 ---
 
@@ -416,6 +417,7 @@ flowchart LR
 | Compiler | generated DuckDB SQL runs on sample data and must match rows worked out by hand |
 | Lineage | each example's column map compared against one worked out by hand |
 | Row trace | tracing never changes a step's rows; every traced target row is rebuilt from only its source rows |
+| Diff | step, column, lineage and row changes for edited examples, worked out by hand; `--git` mode on a scratch repository |
 | Importer | the original SQL and the imported, recompiled pipeline must return identical rows |
 | PowerCenter | the sample mapping runs in DuckDB and must match rows worked out by hand; the same job rebuilt with a mapplet, session, workflow and parameter file must return identical rows; every transformation type and scorecard status has a test |
 | Expressions | each Informatica expression runs in DuckDB and must return PowerCenter's answer |
@@ -434,10 +436,11 @@ imported Teradata job and the imported PowerCenter mapping.
 
 | Folder | What's in it |
 | --- | --- |
-| [`core/`](core) | the Python package: spec, compiler, lineage, importer, CLI, browser bridge |
+| [`core/`](core) | the Python package: spec, compiler, lineage, row trace, diff, importers, CLI, browser bridge |
 | [`web/`](web) | the playground: React, React Flow, Pyodide worker, DuckDB-Wasm |
 | [`examples/`](examples) | sample data, example pipelines, a legacy Teradata job and a PowerCenter mapping |
-| [`docs/`](docs) | spec reference, architecture notes, SQL and PowerCenter importer guides |
+| [`docs/`](docs) | spec reference, architecture notes, importer guides, outputs, the pull request bot |
+| [`action.yml`](action.yml) | the pull request bot as a GitHub Action |
 | [`spikes/`](spikes) | small experiments that proved an approach |
 
 ---
@@ -473,8 +476,8 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 - [x] Spark SQL and PySpark run against real Spark in CI
 - [x] dbt and Lakeflow pipeline outputs, both run in CI
 - [x] Row-level trace: click an output row, see the input rows behind it
+- [x] Pull request bot: lineage and data diffs posted on every PR ([`uses: Fullcountr/redcliff@main`](docs/pr-bot.md))
 - [ ] MCP server, so AI agents can edit pipelines and show a diff before you accept
-- [ ] Pull request bot: lineage and data diffs posted on every PR
 
 ---
 

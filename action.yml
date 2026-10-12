@@ -1,0 +1,94 @@
+name: Redcliff pipeline diff
+description: Comment on pull requests with what each pipeline change does to steps, columns, column lineage and sample data.
+author: Redcliff
+branding:
+  icon: git-pull-request
+  color: orange
+
+inputs:
+  base:
+    description: Git ref to compare with. Defaults to the pull request's base branch.
+    default: ""
+  paths:
+    description: Only look for specs under these paths (space separated). Defaults to the whole repository.
+    default: ""
+  data:
+    description: Also run every target on the sample data in the repository, before and after, and compare the rows.
+    default: "true"
+  comment:
+    description: Post the report as a pull request comment, updated in place on every push.
+    default: "true"
+  fail-on-issues:
+    description: Fail the check when a changed spec has problems (an unknown column, a cycle, ...).
+    default: "false"
+  python-version:
+    description: Python to run Redcliff with.
+    default: "3.12"
+
+outputs:
+  report:
+    description: Path of the Markdown report.
+    value: ${{ steps.diff.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install Redcliff
+      shell: bash
+      run: pip install --quiet "${{ github.action_path }}/core[cli]"
+
+    - name: Diff the pipelines
+      id: diff
+      shell: bash
+      env:
+        BASE: ${{ inputs.base || format('origin/{0}', github.base_ref) }}
+        BASE_BRANCH: ${{ github.base_ref }}
+        PATHS: ${{ inputs.paths }}
+        DATA: ${{ inputs.data }}
+        FAIL: ${{ inputs.fail-on-issues }}
+      run: |
+        if [ -n "$BASE_BRANCH" ] && ! git rev-parse --verify --quiet "$BASE" > /dev/null; then
+          git fetch --no-tags --quiet origin "$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH"
+        fi
+        report="$RUNNER_TEMP/redcliff-diff.md"
+        args=(--git "$BASE" -o "$report")
+        [ "$DATA" = "true" ] && args+=(--data)
+        [ "$FAIL" = "true" ] && args+=(--fail-on-issues)
+        status=0
+        # shellcheck disable=SC2086
+        redcliff diff "${args[@]}" $PATHS || status=$?
+        cat "$report" >> "$GITHUB_STEP_SUMMARY"
+        echo "report=$report" >> "$GITHUB_OUTPUT"
+        echo "status=$status" >> "$GITHUB_OUTPUT"
+
+    - name: Comment on the pull request
+      if: inputs.comment == 'true' && github.event.pull_request.number
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+        REPORT: ${{ steps.diff.outputs.report }}
+      run: |
+        existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+          --jq '.[] | select(.body | startswith("<!-- redcliff-diff -->")) | .id' | head -n 1)
+        if [ -n "$existing" ]; then
+          gh api -X PATCH "repos/$REPO/issues/comments/$existing" -F "body=@$REPORT" > /dev/null \
+            || echo "::warning::Couldn't update the Redcliff comment (a pull request from a fork has a read-only token)."
+        elif grep -q "No pipeline specs changed." "$REPORT"; then
+          echo "No pipeline specs changed; no comment."
+        else
+          gh api "repos/$REPO/issues/$PR/comments" -F "body=@$REPORT" > /dev/null \
+            || echo "::warning::Couldn't comment (a pull request from a fork has a read-only token). The report is in the job summary."
+        fi
+
+    - name: Fail on issues
+      if: steps.diff.outputs.status != '0'
+      shell: bash
+      run: |
+        echo "::error::A changed pipeline spec has problems; see the report."
+        exit 1

@@ -352,6 +352,27 @@ def parse_spec(text: str) -> Pipeline:
     return pipeline
 
 
+def dump_spec(spec: Pipeline | dict[str, Any], fmt: str = "yaml") -> str:
+    """Spec text in the house style: YAML with short lists inline (JSON without PyYAML)."""
+    data = spec.to_dict() if isinstance(spec, Pipeline) else spec
+    if fmt == "yaml":
+        try:
+            import yaml
+        except ImportError:
+            pass
+        else:
+            class _Dumper(yaml.SafeDumper):
+                pass
+
+            def short_lists_inline(dumper, items):  # inputs: [orders], not one line per item
+                flow = all(isinstance(i, (str, int, float, bool)) for i in items)
+                return dumper.represent_sequence("tag:yaml.org,2002:seq", items, flow_style=flow)
+
+            _Dumper.add_representer(list, short_lists_inline)
+            return yaml.dump(data, Dumper=_Dumper, sort_keys=False, allow_unicode=True, width=100)
+    return json.dumps(data, indent=2) + "\n"
+
+
 def load_spec(path: str | Path) -> Pipeline:
     """Read, parse and validate a spec file (.yaml, .yml or .json)."""
     return parse_spec(Path(path).read_text(encoding="utf-8"))

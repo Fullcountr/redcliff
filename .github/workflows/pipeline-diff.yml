@@ -1,0 +1,23 @@
+name: Pipeline diff
+
+# Redcliff's own pull request bot, run on this repository: every pull request that changes a
+# pipeline spec gets a comment with what the change does. Other repositories use it with
+# `uses: Fullcountr/redcliff@main` (see docs/pr-bot.md).
+on:
+  pull_request:
+    paths: ["examples/**", "action.yml", "core/src/redcliff/diff.py"]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./
+        with:
+          fail-on-issues: "true"

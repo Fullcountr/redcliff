@@ -8,6 +8,7 @@
     redcliff lineage pipeline.yaml --impact orders.status
     redcliff run pipeline.yaml --db warehouse.duckdb
     redcliff trace pipeline.yaml out --where "region = 'South'"
+    redcliff diff old.yaml new.yaml --data            (or: redcliff diff --git origin/main)
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from redcliff.compile import CompileError, compile_pyspark, compile_query, compi
 from redcliff.importer import SQLImportError, import_sql
 from redcliff.lineage import Ref, blast_radius, build_graph, openlineage_facet, trace_to_sources
 from redcliff.powercenter import import_powercenter
-from redcliff.spec import SpecError, load_spec
+from redcliff.spec import SpecError, dump_spec, load_spec
 
 
 def _read_mapping(path: str) -> dict:
@@ -34,25 +35,7 @@ def _read_mapping(path: str) -> dict:
 
 
 def _write_spec(data: dict, path: str | None) -> str:
-    use_yaml = path is None or path.endswith((".yaml", ".yml"))
-    text = None
-    if use_yaml:
-        try:
-            import yaml
-
-            class _Dumper(yaml.SafeDumper):
-                pass
-
-            def short_lists_inline(dumper, items):  # inputs: [orders], not one line per item
-                flow = all(isinstance(i, (str, int, float, bool)) for i in items)
-                return dumper.represent_sequence("tag:yaml.org,2002:seq", items, flow_style=flow)
-
-            _Dumper.add_representer(list, short_lists_inline)
-            text = yaml.dump(data, Dumper=_Dumper, sort_keys=False, allow_unicode=True, width=100)
-        except ImportError:
-            pass
-    if text is None:
-        text = json.dumps(data, indent=2) + "\n"
+    text = dump_spec(data, "yaml" if path is None or path.endswith((".yaml", ".yml")) else "json")
     if path:
         Path(path).write_text(text, encoding="utf-8")
     return text
@@ -237,6 +220,116 @@ def cmd_trace(args) -> int:
     return 0
 
 
+MARKER = "<!-- redcliff-diff -->"
+
+
+def _git(*args: str, cwd: str | None = None) -> str:
+    import subprocess
+
+    done = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    if done.returncode:
+        raise FileNotFoundError(f"git {' '.join(args)}: {done.stderr.strip()}")
+    return done.stdout
+
+
+def _as_pipeline(text: str | None):
+    """A spec's text as a Pipeline, or None when it isn't a pipeline spec."""
+    from redcliff.spec import Pipeline
+
+    if text is None:
+        return None
+    try:
+        if text.lstrip().startswith("{"):
+            data = json.loads(text)
+        else:
+            import yaml
+
+            data = yaml.safe_load(text)
+        if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
+            return None
+        return Pipeline.from_dict(data)
+    except Exception:  # noqa: BLE001 - not a spec, or not parseable: skip it
+        return None
+
+
+def _diff_one(base, head, args, base_dir, head_dir):
+    from redcliff.diff import data_diff, diff_pipelines
+    from redcliff.spec import Pipeline
+
+    base = base or Pipeline(name=head.name, nodes=[])
+    diff = diff_pipelines(base, head)
+    if args.data and not diff.issues:
+        try:
+            import duckdb
+        except ImportError:
+            _err("--data needs DuckDB: pip install duckdb")
+        else:
+            con = duckdb.connect(args.db, read_only=True) if args.db else duckdb.connect()
+            diff.data = data_diff(base, head, con, base_dir, head_dir)
+    return diff
+
+
+def cmd_diff(args) -> int:
+    from redcliff.spec import Pipeline
+
+    results = []  # (label, diff)
+    if args.git:
+        root = _git("rev-parse", "--show-toplevel").strip()
+        names = _git("diff", "--name-only", "--diff-filter=ACMRD", args.git, "--", *(args.paths or ["."]), cwd=None)
+        prefix = _git("rev-parse", "--show-prefix").strip()
+        for rel in names.split():
+            if not rel.endswith((".yaml", ".yml", ".json")):
+                continue
+            path = Path(root) / rel
+            head_text = path.read_text(encoding="utf-8") if path.exists() else None
+            try:
+                base_text = _git("show", f"{args.git}:{rel}", cwd=root)
+            except FileNotFoundError:
+                base_text = None
+            base, head = _as_pipeline(base_text), _as_pipeline(head_text)
+            if head is None and base is None:
+                continue
+            label = rel[len(prefix):] if prefix and rel.startswith(prefix) else rel
+            if head is None:
+                results.append((label, None))
+                continue
+            results.append((label, _diff_one(base, head, args, path.parent, path.parent)))
+    else:
+        if not args.paths or len(args.paths) != 2:
+            _err("give two specs (BASE HEAD), or --git REF")
+            return 2
+        a, b = (Path(p) for p in args.paths)
+        base = _as_pipeline(a.read_text(encoding="utf-8"))
+        head = _as_pipeline(b.read_text(encoding="utf-8"))
+        if base is None or head is None:
+            _err("both files must be pipeline specs")
+            return 1
+        results.append((str(b), _diff_one(base, head, args, a.parent, b.parent)))
+
+    if args.format == "json":
+        text = json.dumps({label: (d.to_dict() if d else {"removed": True}) for label, d in results}, indent=2) + "\n"
+    else:
+        lines = [MARKER, "## Redcliff: what this change does to the pipelines", ""]
+        if not results:
+            lines.append("No pipeline specs changed.")
+        for label, d in results:
+            if d is None:
+                lines += [f"### `{label}`", "", "**pipeline removed**", ""]
+            else:
+                lines.append(d.to_markdown(title=f"`{label}`", level=3))
+        lines += ["<sub>Generated by [Redcliff](https://github.com/Fullcountr/redcliff) from the pipeline specs; "
+                  "data compares each target on the sample data in the repository.</sub>" if args.data else
+                  "<sub>Generated by [Redcliff](https://github.com/Fullcountr/redcliff) from the pipeline specs.</sub>"]
+        text = "\n".join(lines).rstrip() + "\n"
+    if args.output:
+        Path(args.output).write_text(text, encoding="utf-8")
+        _err(f"wrote {args.output}")
+    else:
+        print(text, end="")
+    has_issues = any(d is not None and d.issues for _l, d in results)
+    return 1 if has_issues and args.fail_on_issues else 0
+
+
 # --------------------------------------------------------------------------- entry point
 
 
@@ -292,6 +385,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", help="DuckDB database file holding table sources")
     p.add_argument("--limit", type=int, default=10)
     p.set_defaults(func=cmd_trace)
+
+    p = sub.add_parser("diff", help="what a change does: steps, columns, lineage and data")
+    p.add_argument("paths", nargs="*", help="BASE HEAD specs; with --git, paths to limit the search to")
+    p.add_argument("--git", metavar="REF", help="compare every changed spec with its version at REF")
+    p.add_argument("--data", action="store_true", help="also run each target on sample data, both ways")
+    p.add_argument("--db", help="DuckDB database file holding table sources")
+    p.add_argument("--format", choices=["md", "json"], default="md")
+    p.add_argument("--fail-on-issues", action="store_true", help="exit 1 if a new spec has problems")
+    p.add_argument("-o", "--output")
+    p.set_defaults(func=cmd_diff)
     return parser
 
 
