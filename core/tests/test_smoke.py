@@ -7,7 +7,9 @@ import redcliff
 
 
 def test_version():
-    assert redcliff.__version__ == "0.0.1"
+    from importlib.metadata import version
+
+    assert redcliff.__version__ == version("redcliff")  # one source of truth: __init__.py
 
 
 def test_teradata_qualify_transpiles_to_duckdb():
