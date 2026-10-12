@@ -297,6 +297,27 @@ await step("an SSIS package imports with its data flow and control flow", async 
   await shot(page, "15-ssis");
 });
 
+await step("a data model shows as a diagram, exports DDL and Mermaid, and imports DDL", async () => {
+  await page.locator(".topbar").getByRole("button", { name: "Examples" }).click();
+  await page.getByRole("menuitem", { name: /^sales/ }).click();
+  for (const id of ["dim_customer", "dim_date", "fct_orders"]) await page.waitForSelector(`[data-testid="entity-${id}"]`);
+  assert.equal(await page.locator(".react-flow__edge.rel").count(), 2);
+  await page.waitForSelector('[data-testid="model-valid"]', { timeout: 30000 });
+  await page.locator('[data-testid="entity-fct_orders"]').click();
+  assert.match(await page.locator(".panel").textContent(), /Grain: one order/);
+  await page.getByRole("tab", { name: "Export" }).click();
+  await page.waitForFunction(() => /FOREIGN KEY \(customer_key\) REFERENCES dim_customer/.test(document.querySelector('[data-testid="model-export"]')?.textContent ?? ""));
+  await page.getByRole("button", { name: "Mermaid", exact: true }).click();
+  await page.waitForFunction(() => (document.querySelector('[data-testid="model-export"]')?.textContent ?? "").startsWith("erDiagram"));
+  await shot(page, "16-model");
+  await page.getByRole("tab", { name: "Import" }).click();
+  await page.locator(".panel").getByRole("button", { name: "Import", exact: true }).click();
+  await page.waitForSelector('[data-testid="entity-fct_sales"]');
+  await page.waitForSelector('[data-testid="entity-dim_product"]');
+  await page.locator(".topbar").getByRole("button", { name: "Pipelines" }).click();
+  await page.waitForSelector(".react-flow__node .step");
+});
+
 await step("works on a phone-sized screen and in dark mode", async () => {
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: "dark" });
   const p = await phone.newPage();

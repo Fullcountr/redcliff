@@ -1,6 +1,6 @@
 # Data models
 
-Status: design agreed, M1 in progress. This page is the source of truth for the decisions; the
+Status: M1 done (spec, validator, imports, exports, CLI, and the model view in the playground); M2 next. This page is the source of truth for the decisions; the
 roadmap in the README tracks progress.
 
 ## The idea
@@ -86,3 +86,10 @@ a `table`), call an integer `*_key`/`*_sk`/`*_hk` primary key a surrogate key an
 key a business key, and call decimal columns, and integer columns named like quantities, measures in
 facts. Whatever they can't place (an index, a many-to-many reference, a fact with no grain) comes
 back as a warning, never a silent drop. Example: [`examples/models/sales.yaml`](../examples/models/sales.yaml).
+
+## In the playground
+
+**Examples → Data models → sales** opens the model view: entities as cards (kind, SCD1/SCD2, grain;
+attributes with PK, FK, SK, BK, Σ and SCD1 marks) and relationships drawn key to key. Click an entity
+for its attributes. The panel checks the model, exports DDL (in eight dialects), DBML, Mermaid and dbt,
+edits the YAML, and imports DDL or DBML (**Import → Data model**). **Pipelines** goes back to the canvas.

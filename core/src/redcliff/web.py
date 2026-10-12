@@ -177,3 +177,50 @@ def trace(spec: Any, node_id: str, column: str) -> dict[str, Any]:
     graph = build_graph(_load(spec))
     traced = trace_to_sources(graph, Ref(node_id, column))
     return {"sources": [{"column": str(r), "type": t, "subtype": s} for r, (t, s) in sorted(traced.items())]}
+
+
+# --------------------------------------------------------------------------- data models
+
+
+def _model(model: Any):
+    from redcliff.model import Model
+
+    return Model.from_dict(json.loads(model) if isinstance(model, str) else model)
+
+
+@_wrap
+def model_analyze(model: Any) -> dict[str, Any]:
+    """A model's problems, its normalized form, and each entity's key and outgoing relationships."""
+    from redcliff.model import validate_model
+
+    m = _model(model)
+    return {
+        "valid": not (issues := validate_model(m)),
+        "issues": [_issue(i) for i in issues],
+        "model": m.to_dict(),
+        "keys": {e.id: e.key() for e in m.entities},
+        "scd2": [e.id for e in m.entities if e.scd2],
+    }
+
+
+@_wrap
+def model_export(model: Any, fmt: str, dialect: str | None = None) -> dict[str, Any]:
+    """DDL (in a dialect), DBML, Mermaid or a dbt schema.yml for a valid model."""
+    from redcliff.model import EXPORTS, validate_model
+    from redcliff.spec import SpecError
+
+    m = _model(model)
+    issues = validate_model(m)
+    if issues:
+        raise SpecError(issues)
+    fn = EXPORTS[fmt]
+    return {"code": fn(m, dialect or "duckdb") if fmt == "ddl" else fn(m)}
+
+
+@_wrap
+def model_import(text: str, fmt: str, dialect: str | None = None, name: str = "imported") -> dict[str, Any]:
+    """A model from CREATE TABLE statements (fmt ``ddl``) or DBML (fmt ``dbml``)."""
+    from redcliff.model import from_dbml, from_ddl
+
+    result = from_dbml(text, name) if fmt == "dbml" else from_ddl(text, dialect or None, name)
+    return {"model": result.model.to_dict(), "warnings": result.warnings}

@@ -3,7 +3,7 @@ import {
   applyNodeChanges, useReactFlow,
 } from "@xyflow/react";
 import {
-  BookOpen, Boxes, ChevronDown, CircleCheck, FileCode2, FileSpreadsheet, Lock, Maximize, Minus,
+  BookOpen, Boxes, ChevronDown, CircleCheck, FileCode2, FileSpreadsheet, Layers, Lock, Maximize, Minus,
   Monitor, Moon, MousePointerClick, Plus, Share2, Sparkles, Sun, Upload, WandSparkles, Waypoints, Workflow,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -11,12 +11,13 @@ import { data } from "./engine/data";
 import { engine, engineReady, startEngine } from "./engine/engine";
 import { ImportDialog, type ImportMode, type ImportSamples } from "./components/ImportDialog";
 import { Inspector, type Tab } from "./components/Inspector";
+import { ModelView, type ModelTab } from "./components/ModelView";
 import { StepNode, type StepNodeType } from "./components/StepNode";
 import { Variables } from "./components/Variables";
 import { layout } from "./layout";
 import { fromImpact, trace, type Highlight } from "./lineage";
 import {
-  defaultParams, refParts, type Analysis, type Impact, type ImportResult, type Scorecard, type ScoreStatus,
+  defaultParams, refParts, type Analysis, type DataModel, type Impact, type ImportResult, type Scorecard, type ScoreStatus,
   type Spec, type Step, type StepType, tally, type CheckRun,
 } from "./model";
 import { shareLink, specFromHash } from "./share";
@@ -24,7 +25,7 @@ import { BrandMark, Menu, MenuItem, useTheme, type Theme } from "./ui";
 
 type Precomputed = { analysis: Analysis; counts: Record<string, number>; impacts: Record<string, Impact> };
 type Samples = {
-  tables: string[]; specs: Record<string, Spec>; legacy: string; powercenter: string;
+  tables: string[]; specs: Record<string, Spec>; models: Record<string, DataModel>; legacy: string; powercenter: string;
   workflow: { xml: string; params: string };
   storeMart: string;
   ssis: string;
@@ -81,6 +82,10 @@ export default function App() {
   }>({ mode: null, busy: false, error: null });
   const [toast, setToast] = useState<string | null>(null);
   const [example, setExample] = useState("orders_revenue");
+  const [view, setView] = useState<"pipeline" | "model">("pipeline");
+  const [dataModel, setDataModel] = useState<DataModel | null>(null);
+  const [modelTab, setModelTab] = useState<ModelTab>("overview");
+  useEffect(() => { if (importing.mode) setView("pipeline"); }, [importing.mode]);
   const [theme, setTheme, dark] = useTheme();
   const fileInput = useRef<HTMLInputElement>(null);
   const dataLoaded = useRef<Promise<void> | null>(null);
@@ -417,6 +422,14 @@ export default function App() {
     replaceSpec(next);
   };
 
+  const openModel = (m: DataModel | null, t: ModelTab = "overview") => {
+    const next = m ?? dataModel ?? (samples ? Object.values(samples.models)[0] : null);
+    if (!next) return;
+    setDataModel(next);
+    setModelTab(t);
+    setView("model");
+  };
+
   const share = async () => {
     if (!spec) return;
     const url = await shareLink(spec);
@@ -437,7 +450,11 @@ export default function App() {
 
   return (
     <div className="app">
-      <main
+      {view === "model" && dataModel && (
+        <ModelView model={dataModel} engineReady={ready} tab={modelTab} onTab={setModelTab}
+          onChange={(m, note) => { setDataModel(m); if (note) say(note); }} />
+      )}
+      {view === "pipeline" && <main
         className="canvas"
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}
@@ -461,14 +478,23 @@ export default function App() {
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} />
         </ReactFlow>
-      </main>
+      </main>}
 
       <header className="topbar glass">
         <div className="brand">
           <BrandMark />
           <span className="brand-name">Redcliff</span>
           <span className="crumb-sep" aria-hidden="true">/</span>
-          {spec && (
+          {view === "model" && dataModel && (
+            <input
+              className="pipeline-name"
+              aria-label="Model name"
+              value={dataModel.name}
+              spellCheck={false}
+              onChange={(e) => setDataModel({ ...dataModel, name: e.target.value })}
+            />
+          )}
+          {view === "pipeline" && spec && (
             <input
               className="pipeline-name"
               aria-label="Pipeline name"
@@ -477,13 +503,18 @@ export default function App() {
               onChange={(e) => setSpec({ ...spec, name: e.target.value })}
             />
           )}
-          {scorecard && (
+          {view === "pipeline" && scorecard && (
             <button className="chip ok" onClick={() => setTab("migration")} title="Open the migration scorecard">
               <CircleCheck />{Math.round(scorecard.automated * 100)}% automatic
             </button>
           )}
         </div>
         <nav className="bar-actions" aria-label="Pipeline">
+          {view === "model" && (
+            <button className="btn ghost" onClick={() => setView("pipeline")} title="Back to the pipeline canvas">
+              <Waypoints /><span className="label">Pipelines</span>
+            </button>
+          )}
           <Menu
             label="Examples"
             button={({ open, toggle }) => (
@@ -497,7 +528,14 @@ export default function App() {
                 <div className="menu-label">Pipelines</div>
                 {samples && Object.keys(samples.specs).map((k) => (
                   <MenuItem key={k} icon={Waypoints} title={k.replace(/_/g, " ")} sub={EXAMPLES[k]}
-                    checked={example === k} onClick={() => { close(); loadExample(k); }} />
+                    checked={view === "pipeline" && example === k} onClick={() => { close(); setView("pipeline"); loadExample(k); }} />
+                ))}
+                <div className="menu-sep" />
+                <div className="menu-label">Data models</div>
+                {samples && Object.entries(samples.models).map(([k, m]) => (
+                  <MenuItem key={k} icon={Layers} title={k.replace(/_/g, " ")}
+                    sub={`${m.style === "data_vault" ? "Data Vault" : "Kimball"}: ${m.entities.map((e) => e.id).join(", ")}`}
+                    checked={view === "model" && dataModel?.name === m.name} onClick={() => { close(); openModel(m); }} />
                 ))}
                 <div className="menu-sep" />
                 <div className="menu-label">Legacy jobs to import</div>
@@ -514,7 +552,7 @@ export default function App() {
               </>
             )}
           </Menu>
-          <button className="btn ghost" onClick={() => fileInput.current?.click()} disabled={!runnable} title="Add CSV files as sources">
+          <button className="btn ghost" onClick={() => fileInput.current?.click()} disabled={!runnable || view !== "pipeline"} title="Add CSV files as sources">
             <FileSpreadsheet /><span className="label">Add CSV</span>
           </button>
           <input ref={fileInput} type="file" accept=".csv" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
@@ -523,7 +561,7 @@ export default function App() {
             <ThemeIcon />
           </button>
           <span className="bar-divider" />
-          <button className="btn" onClick={share} disabled={!spec} aria-label="Share link" title="Copy a link that holds this pipeline">
+          <button className="btn" onClick={share} disabled={!spec || view !== "pipeline"} aria-label="Share link" title="Copy a link that holds this pipeline">
             <Share2 /><span className="label">Share</span>
           </button>
           <Menu
@@ -542,19 +580,22 @@ export default function App() {
                 <MenuItem icon={Workflow} title="Informatica PowerCenter" sub="Mapping XML, with a migration scorecard"
                   onClick={() => { close(); setImporting({ mode: "powercenter", busy: false, error: null }); }} />
                 <MenuItem icon={Boxes} title="SSIS package" sub=".dtsx data flows, with a migration scorecard"
-                  onClick={() => { close(); setImporting({ mode: "ssis", busy: false, error: null }); }} />
+                  onClick={() => { close(); setView("pipeline"); setImporting({ mode: "ssis", busy: false, error: null }); }} />
+                <div className="menu-sep" />
+                <MenuItem icon={Layers} title="Data model" sub="CREATE TABLE statements or DBML"
+                  onClick={() => { close(); openModel(null, "import"); }} />
               </>
             )}
           </Menu>
         </nav>
       </header>
 
-      {spec && spec.variables && Object.keys(spec.variables).length > 0 && !importing.mode && (
+      {view === "pipeline" && spec && spec.variables && Object.keys(spec.variables).length > 0 && !importing.mode && (
         <Variables values={spec.variables} belowHint={!selectedId && !highlight}
           onChange={(variables) => replaceSpec({ ...spec, variables })} />
       )}
 
-      {spec && !selectedId && !highlight && !importing.mode && (
+      {view === "pipeline" && spec && !selectedId && !highlight && !importing.mode && (
         <div className="hint glass">
           <span><MousePointerClick />Hover a column to trace it</span>
           <span className="dot-sep" />
@@ -566,15 +607,15 @@ export default function App() {
         </div>
       )}
 
-      <div className="zoom glass" role="group" aria-label="Zoom">
+      {view === "pipeline" && <div className="zoom glass" role="group" aria-label="Zoom">
         <button className="btn ghost icon" onClick={() => flow.zoomIn({ duration: 150 })} aria-label="Zoom in"><Plus /></button>
         <button className="btn ghost icon" onClick={() => flow.zoomOut({ duration: 150 })} aria-label="Zoom out"><Minus /></button>
         <div className="zoom-sep" />
         <button className="btn ghost icon" onClick={fit} aria-label="Fit to screen" title="Fit to screen"><Maximize /></button>
         <button className="btn ghost icon" onClick={() => setPositions({})} aria-label="Tidy layout" title="Tidy layout"><WandSparkles /></button>
-      </div>
+      </div>}
 
-      {spec && (
+      {view === "pipeline" && spec && (
         <Inspector
           tab={tab}
           onTab={setTab}
@@ -604,8 +645,9 @@ export default function App() {
           {eng.state === "ready" ? `Engine ready in ${((eng.ms ?? 0) / 1000).toFixed(1)} s` : eng.state === "failed" ? "Engine failed" : "Starting the engine"}
         </span>
         {ready && !dataReady && <><span className="sep" /><span className="faint">Loading DuckDB for previews</span></>}
-        {spec && <><span className="sep" /><span>{spec.nodes.length} steps</span></>}
-        {analysis && (
+        {view === "model" && dataModel && <><span className="sep" /><span>{dataModel.entities.length} entities</span></>}
+        {view === "pipeline" && spec && <><span className="sep" /><span>{spec.nodes.length} steps</span></>}
+        {view === "pipeline" && analysis && (
           <><span className="sep" /><span className={issueCount ? "issues" : ""}>
             {issueCount ? `${issueCount} ${issueCount === 1 ? "issue" : "issues"}` : "No issues"}
           </span></>

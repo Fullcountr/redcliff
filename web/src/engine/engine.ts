@@ -1,5 +1,5 @@
 // Promise-based client for the Pyodide engine worker.
-import type { Analysis, Impact, ImportResult, Spec } from "../model";
+import type { Analysis, DataModel, Impact, ImportResult, ModelAnalysis, ModelExport, Spec } from "../model";
 
 type Result<T> = ({ ok: true } & T) | { ok: false; error: string; issues?: string[] };
 
@@ -54,4 +54,9 @@ export const engine = {
   importSsis: (xml: string) => call<ImportResult>("import_ssis", xml),
   importPowercenter: (xml: string, params?: string) => call<ImportResult>("import_powercenter", xml, null, params || null),
   impact: (spec: Spec, node: string, column: string) => call<Impact>("impact", json(spec), node, column),
+  modelAnalyze: (model: DataModel) => call<ModelAnalysis>("model_analyze", JSON.stringify(model)),
+  modelExport: (model: DataModel, fmt: ModelExport, dialect?: string) =>
+    call<{ code: string }>("model_export", JSON.stringify(model), fmt, dialect ?? null),
+  modelImport: (text: string, fmt: "ddl" | "dbml", dialect: string | null, name: string) =>
+    call<{ model: DataModel; warnings: string[] }>("model_import", text, fmt, dialect, name),
 };

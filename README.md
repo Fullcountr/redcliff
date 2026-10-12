@@ -511,7 +511,7 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 Add a file, get a model: Redcliff profiles it, proposes a Kimball or Data Vault 2.0 model, you
 adjust it on the canvas, and the pipelines that load it are generated from it.
 
-- [ ] **M1** (in progress: spec, validator, imports, exports and `redcliff model` are done; the diagram is next) Model spec (`model.yaml`, referenced by pipelines): import SQL DDL and DBML; export DDL,
+- [x] **M1** Model spec (`model.yaml`, referenced by pipelines): import SQL DDL and DBML; export DDL,
   DBML, a Mermaid diagram and dbt `schema.yml` tests; a read-only diagram in the playground
 - [ ] **M2** Profile files (types, keys, foreign keys) and propose a Kimball model, with the reason
   for every proposal; a date dimension

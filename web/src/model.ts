@@ -148,3 +148,40 @@ export function refParts(ref: string): [string, string] {
   const i = ref.indexOf(".");
   return [ref.slice(0, i), ref.slice(i + 1)];
 }
+
+// ------------------------------------------------------------------ data models (docs/modeling.md)
+
+export type EntityKind = "dimension" | "fact" | "hub" | "link" | "satellite" | "table";
+export type AttributeRole = "surrogate_key" | "durable_key" | "business_key" | "measure";
+export type ModelAttribute = {
+  name: string;
+  type: string;
+  role?: AttributeRole;
+  history?: "scd1" | "scd2";
+  track?: boolean;
+  description?: string;
+};
+export type ModelEntity = {
+  id: string;
+  kind: EntityKind;
+  description?: string;
+  grain?: string;
+  history?: "scd1" | "scd2";
+  attributes: ModelAttribute[];
+};
+export type DataModel = {
+  version: number;
+  name: string;
+  style: "kimball" | "data_vault";
+  description?: string;
+  entities: ModelEntity[];
+  relationships?: { from: string; to: string }[];
+};
+export type ModelAnalysis = {
+  valid: boolean;
+  issues: Issue[];
+  model: DataModel;
+  keys: Record<string, string[]>;
+  scd2: string[];
+};
+export type ModelExport = "ddl" | "dbml" | "mermaid" | "dbt";
