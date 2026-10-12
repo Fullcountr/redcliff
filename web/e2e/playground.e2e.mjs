@@ -54,11 +54,25 @@ async function zoomTo(node) {
 
 console.log(`Redcliff playground e2e against ${url}`);
 
-await step("engine boots in the browser", async () => {
+await step("the example is interactive before the engine has loaded", async () => {
+  const started = Date.now();
   await page.goto(url);
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="revenue_by_region"] .step-rows')?.textContent === "2 rows", null, { timeout: 30000 });
+  const interactive = Date.now() - started;
+  const status = await page.locator('[data-testid="engine-status"]').textContent();
+  await page.locator('.react-flow__node[data-id="revenue_by_region"] button.col', { hasText: /^revenue$/ }).hover();
+  await page.waitForSelector('.react-flow__node[data-id="orders"] button.col.is-lit');
+  await page.mouse.move(5, 5);
+  console.log(`       canvas interactive after ${interactive} ms (engine: "${status}")`);
+  assert.ok(!status.startsWith("Engine ready") || interactive < 3000, `canvas waited for the engine (${interactive} ms)`);
+});
+
+await step("engine boots in the browser", async () => {
+  const started = Date.now();
   await page.waitForFunction(
     () => document.querySelector('[data-testid="engine-status"]')?.textContent?.startsWith("Engine ready"),
     null, { timeout: 120000 });
+  console.log(`       engine ready ${Date.now() - started} ms later`);
 });
 
 await step("default example renders with live row counts", async () => {

@@ -732,6 +732,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .tok-com { color: #857d74; font-style: italic; }
 .tok-fn { color: #93c8f2; }
 
+.starting { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--line); color: var(--text-2); font-size: 12.5px; }
+
 /* migration scorecard */
 .score-hero { display: flex; align-items: center; gap: 16px; padding: 14px; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--line); }
 .ring { position: relative; width: 88px; height: 88px; flex: none; }

@@ -29,11 +29,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Build the app (vendors Pyodide, sqlglot and the engine)
-        working-directory: web
+      - name: Build the app (vendors Pyodide, sqlglot and the engine; precomputes the examples)
         run: |
-          npm ci
-          npm run build
+          pip install "./core[cli]"
+          cd web && npm ci && npm run build
       - name: Browser end-to-end test
         working-directory: web
         run: |

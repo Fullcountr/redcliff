@@ -4,7 +4,7 @@ import {
   Rows3, SlidersHorizontal, Table2, Trash2, TriangleAlert, Unlink, Waypoints, X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { query, type QueryResult } from "../engine/duck";
+import { data, type QueryResult } from "../engine/data";
 import { engine } from "../engine/engine";
 import type { Analysis, Impact, Scorecard, ScoreItem, ScoreStatus, Spec, Step, StepType } from "../model";
 import { STEP_LABELS, summarize } from "../model";
@@ -20,7 +20,8 @@ type Props = {
   selected: Step | null;
   impact: Impact | null;
   notes: string[];
-  ready: boolean;
+  ready: boolean; // engine and DuckDB both loaded
+  engineReady: boolean;
   scorecard: Scorecard | null;
   activeItem: string | null;
   onPickItem: (name: string | null) => void;
@@ -265,7 +266,7 @@ function DataPanel({ spec, selected, analysis, ready }: Props) {
     (async () => {
       const q = await engine.previewQuery(spec, nodeId);
       if (!q.ok) throw new Error(q.error);
-      const r = await query(q.sql, 200);
+      const r = await data.query(q.sql, 200);
       if (live) {
         setResult(r);
         setState({ loading: false, error: null, shown: q.node });
@@ -275,6 +276,7 @@ function DataPanel({ spec, selected, analysis, ready }: Props) {
   }, [spec, nodeId, ready, analysis]);
 
   if (!nodeId) return <p className="quiet">Add a step to preview its data.</p>;
+  if (!ready) return <Starting what="DuckDB, which computes previews in this tab" />;
   if (analysis && !analysis.valid) return <p className="error">Fix the pipeline's issues to preview data.</p>;
   const numeric = result?.columns.map((_, j) => result.rows.length > 0 && result.rows.every((r) => r[j] === null || typeof r[j] === "number" || /^-?\d+(\.\d+)?$/.test(String(r[j])))) ?? [];
   return (
@@ -311,7 +313,16 @@ const TARGETS = [
   { id: "duckdb", label: "DuckDB SQL" },
 ];
 
-function CodePanel({ spec, selected, ready }: Props) {
+function Starting({ what }: { what: string }) {
+  return (
+    <div className="starting" role="status">
+      <span className="status-dot loading" />
+      <span>Starting {what}. It loads once, then stays cached.</span>
+    </div>
+  );
+}
+
+function CodePanel({ spec, selected, engineReady: ready }: Props) {
   const [target, setTarget] = useState("spark");
   const [scope, setScope] = useState<"pipeline" | "step">("pipeline");
   const [code, setCode] = useState("");
@@ -327,6 +338,7 @@ function CodePanel({ spec, selected, ready }: Props) {
   }, [spec, target, stepScope, selected, ready]);
   const coloured = useMemo(() => highlight(code, target === "pyspark"), [code, target]);
   const base = stepScope ? selected!.id : spec.name || "pipeline";
+  if (!ready) return <Starting what="the code generator (Python in your browser)" />;
   const fileName = target === "pyspark" ? `${base}.py` : `${base}.${target === "spark" ? "spark" : "duckdb"}.sql`;
   return (
     <section className="code">

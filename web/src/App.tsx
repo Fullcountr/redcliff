@@ -3,11 +3,11 @@ import {
   applyNodeChanges, useReactFlow,
 } from "@xyflow/react";
 import {
-  BookOpen, Check, ChevronDown, CircleCheck, FileCode2, FileSpreadsheet, LoaderCircle, Lock, Maximize, Minus,
+  BookOpen, ChevronDown, CircleCheck, FileCode2, FileSpreadsheet, Lock, Maximize, Minus,
   Monitor, Moon, MousePointerClick, Plus, Share2, Sparkles, Sun, Upload, WandSparkles, Waypoints, Workflow,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { addCsv, count, loadSamples, startDuck, tables } from "./engine/duck";
+import { data } from "./engine/data";
 import { engine, engineReady, startEngine } from "./engine/engine";
 import { ImportDialog, type ImportMode } from "./components/ImportDialog";
 import { Inspector, type Tab } from "./components/Inspector";
@@ -21,7 +21,11 @@ import {
 import { shareLink, specFromHash } from "./share";
 import { BrandMark, Menu, MenuItem, useTheme, type Theme } from "./ui";
 
-type Samples = { tables: string[]; specs: Record<string, Spec>; legacy: string; powercenter: string };
+type Precomputed = { analysis: Analysis; counts: Record<string, number>; impacts: Record<string, Impact> };
+type Samples = {
+  tables: string[]; specs: Record<string, Spec>; legacy: string; powercenter: string;
+  precomputed: Record<string, Precomputed>;
+};
 type EngineState = { state: "loading" | "ready" | "failed"; ms?: number; error?: string };
 
 const nodeTypes = { step: StepNode };
@@ -74,6 +78,7 @@ export default function App() {
   const [example, setExample] = useState("orders_revenue");
   const [theme, setTheme, dark] = useTheme();
   const fileInput = useRef<HTMLInputElement>(null);
+  const dataLoaded = useRef<Promise<void> | null>(null);
   const flow = useReactFlow();
   const ready = eng.state === "ready";
   const runnable = ready && dataReady;
@@ -90,20 +95,32 @@ export default function App() {
       (ms) => setEng({ state: "ready", ms }),
       (err) => setEng({ state: "failed", error: String(err) }),
     );
-    (async () => {
-      const s: Samples = await (await fetch(`${BASE}samples/samples.json`)).json();
-      setSamples(s);
+    const boot = (async () => {
+      const [s, precomputed] = await Promise.all([
+        fetch(`${BASE}samples/samples.json`).then((r) => r.json()),
+        fetch(`${BASE}samples/precomputed.json`).then((r) => r.json()).catch(() => ({})),
+      ]);
+      setSamples({ ...s, precomputed });
       const shared = await specFromHash(window.location.hash);
       setSpec(shared ?? s.specs.orders_revenue);
       if (shared) setExample("");
-      await startDuck();
-      await loadSamples(BASE, s.tables);
+      // Python first, with the whole connection to itself; DuckDB (previews) after.
+      await engineReady.catch(() => undefined);
+      await data.start();
+      await data.loadSamples(BASE, s.tables);
       setDataReady(true);
-    })().catch((e) => setEng({ state: "failed", error: String(e) }));
+    })();
+    dataLoaded.current = boot;
+    boot.catch((e) => setEng({ state: "failed", error: String(e) }));
   }, []);
+
+  // An unchanged example has its lineage, row counts and blast radius precomputed at build time,
+  // so it's interactive before the engine has loaded.
+  const fresh = samples && spec && example && spec === samples.specs[example] ? samples.precomputed[example] ?? null : null;
 
   // ---------------------------------------------------------------- analysis and row counts
   useEffect(() => {
+    if (fresh) { setAnalysis(fresh.analysis); return; }
     if (!ready || !spec) return;
     let live = true;
     engine.analyze(spec).then((a) => {
@@ -112,9 +129,10 @@ export default function App() {
       else setAnalysis({ valid: false, issues: [{ node: null, message: a.error }], columns: {}, edges: [], dataset_edges: [] });
     });
     return () => { live = false; };
-  }, [spec, ready]);
+  }, [spec, ready, fresh]);
 
   useEffect(() => {
+    if (fresh) { setCounts(fresh.counts); return; }
     if (!runnable || !spec || !analysis?.valid) return;
     let live = true;
     (async () => {
@@ -124,7 +142,7 @@ export default function App() {
         if (!step || step.type === "target") continue;
         try {
           const q = await engine.previewQuery(spec, id);
-          next[id] = q.ok ? await count(q.sql) : null;
+          next[id] = q.ok ? await data.count(q.sql) : null;
         } catch {
           next[id] = null;
         }
@@ -133,7 +151,7 @@ export default function App() {
       }
     })();
     return () => { live = false; };
-  }, [analysis, spec, runnable]);
+  }, [analysis, spec, runnable, fresh]);
 
   // ---------------------------------------------------------------- layout
   const autoPositions = useMemo(() => (spec ? layout(spec, analysis?.columns ?? {}) : {}), [spec, analysis]);
@@ -150,11 +168,12 @@ export default function App() {
   // ---------------------------------------------------------------- lineage focus
   useEffect(() => {
     if (!pinned || !spec) { setImpact(null); return; }
+    if (fresh?.impacts[pinned]) { setImpact(fresh.impacts[pinned]); return; }
     const [node, column] = refParts(pinned);
     let live = true;
     engine.impact(spec, node, column).then((r) => { if (live && r.ok) setImpact(r); });
     return () => { live = false; };
-  }, [pinned, spec]);
+  }, [pinned, spec, fresh]);
 
   const highlight: Highlight | null = useMemo(() => {
     if (!analysis) return null;
@@ -335,7 +354,7 @@ export default function App() {
     setImporting({ mode, busy: true, error: null });
     const r = mode === "powercenter"
       ? await engine.importPowercenter(text)
-      : await engine.importSql(text, dialect, Object.fromEntries(tables.entries()), "imported");
+      : await engine.importSql(text, dialect, await dataLoaded.current!.then(data.schema, () => ({})), "imported");
     if (!r.ok) {
       setImporting({ mode, busy: false, error: r.error });
       return;
@@ -359,7 +378,7 @@ export default function App() {
     let next = spec;
     for (const file of Array.from(files)) {
       if (!/\.csv$/i.test(file.name)) { say(`${file.name} isn't a CSV file`); continue; }
-      const { table, columns } = await addCsv(file.name, await file.text());
+      const { table, columns } = await data.addCsv(file.name, await file.text());
       const id = uniqueId(next, table);
       next = { ...next, nodes: [...next.nodes, { id, type: "source", params: { format: "csv", path: file.name, columns } }] };
       say(`Added ${file.name} as a source`);
@@ -473,7 +492,8 @@ export default function App() {
           <Menu
             label="Import"
             button={({ open, toggle }) => (
-              <button className="btn primary" onClick={toggle} aria-expanded={open} disabled={!ready}>
+              <button className="btn primary" onClick={toggle} aria-expanded={open} disabled={!ready}
+                title={ready ? "Import a legacy job" : "Available once the engine has started"}>
                 <Upload /><span className="label">Import</span><ChevronDown className="caret" />
               </button>
             )}
@@ -490,7 +510,7 @@ export default function App() {
         </nav>
       </header>
 
-      {ready && spec && !selectedId && !highlight && !importing.mode && (
+      {spec && !selectedId && !highlight && !importing.mode && (
         <div className="hint glass">
           <span><MousePointerClick />Hover a column to trace it</span>
           <span className="dot-sep" />
@@ -520,6 +540,7 @@ export default function App() {
           impact={impact}
           notes={notes}
           ready={runnable}
+          engineReady={ready}
           scorecard={scorecard}
           activeItem={activeItem}
           onPickItem={setActiveItem}
@@ -535,8 +556,9 @@ export default function App() {
       <footer className="statusbar glass">
         <span data-testid="engine-status">
           <span className={`status-dot ${eng.state}`} />
-          {eng.state === "ready" ? `Engine ready in ${((eng.ms ?? 0) / 1000).toFixed(1)} s` : eng.state === "failed" ? "Engine failed" : "Starting engine"}
+          {eng.state === "ready" ? `Engine ready in ${((eng.ms ?? 0) / 1000).toFixed(1)} s` : eng.state === "failed" ? "Engine failed" : "Starting the engine"}
         </span>
+        {ready && !dataReady && <><span className="sep" /><span className="faint">Loading DuckDB for previews</span></>}
         {spec && <><span className="sep" /><span>{spec.nodes.length} steps</span></>}
         {analysis && (
           <><span className="sep" /><span className={issueCount ? "issues" : ""}>
@@ -549,26 +571,13 @@ export default function App() {
 
       {toast && <div className="toast" role="status"><Sparkles />{toast}</div>}
 
-      {eng.state !== "ready" && (
-        <div className="boot" role="status">
+      {eng.state === "failed" && (
+        <div className="boot" role="alert">
           <div className="boot-card">
             <div className="boot-mark" aria-hidden="true"><span /><span /><span /></div>
-            {eng.state === "failed" ? (
-              <>
-                <h1>The engine didn't start</h1>
-                <p className="error">{eng.error}</p>
-              </>
-            ) : (
-              <>
-                <h1>Starting Redcliff in your browser</h1>
-                <p>The compiler and lineage engine run here, in Python on WebAssembly. Your data never leaves this tab.</p>
-                <ul className="boot-steps">
-                  <li className={samples ? "done" : "active"}>{samples ? <Check /> : <LoaderCircle className="spin" />}Loading the app and sample data</li>
-                  <li className={dataReady ? "done" : "active"}>{dataReady ? <Check /> : <LoaderCircle className="spin" />}Starting DuckDB for previews</li>
-                  <li className="active"><LoaderCircle className="spin" />Starting Python, sqlglot and the Redcliff engine</li>
-                </ul>
-              </>
-            )}
+            <h1>The engine didn't start</h1>
+            <p className="error">{eng.error}</p>
+            <p>Redcliff needs a recent browser with WebAssembly. Reloading the page usually helps.</p>
           </div>
         </div>
       )}

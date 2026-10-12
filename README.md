@@ -47,9 +47,10 @@ this page. Stop at whichever layer answers your question:
 ## Surface: try it in a minute
 
 **In the browser:** open the [live playground](https://fullcountr.github.io/redcliff/). The
-first visit downloads the engine (Python and DuckDB compiled to WebAssembly, about 50 MB before
-compression, cached after that), so give it a moment. Then everything runs in the tab and
-nothing is sent anywhere.
+example pipeline is ready to explore in under a second, because its lineage, row counts and blast
+radius are computed at build time. Meanwhile the engine loads in the background (Python, then
+DuckDB, compiled to WebAssembly; about 15 MB gzipped, cached after the first visit). After that
+everything runs in the tab and nothing is sent anywhere.
 
 A sample pipeline loads with live row counts. Hover any column. Click one. Then press
 **Import** and pick the legacy Teradata job or the Informatica PowerCenter mapping; both are
@@ -393,7 +394,12 @@ flowchart LR
   the same engine runs in the CLI and, through [Pyodide](https://pyodide.org/), in the browser.
 - **Nothing from a CDN.** The web build vendors Pyodide, the sqlglot wheel, the engine and
   [DuckDB-Wasm](https://duckdb.org/docs/api/wasm/overview), so the app works offline and on
-  any static host. The engine starts in about 5 seconds, once.
+  any static host.
+- **Interactive first, engine second.** The examples' lineage, row counts and blast radius are
+  precomputed by the same Python engine at build time, so the canvas works before anything heavy
+  arrives. Python loads next with the whole connection to itself, and DuckDB after it. On a
+  throttled 25 Mbps connection: example interactive in 0.4 s (was 18.9 s), engine ready in
+  8.9 s (was 15.1 s).
 
 ### How it's tested
 

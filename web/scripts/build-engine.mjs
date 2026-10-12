@@ -62,4 +62,18 @@ const legacy = readFileSync(join(repo, "examples", "legacy", "teradata_revenue.s
 const powercenter = readFileSync(join(repo, "examples", "legacy", "powercenter", "m_customer_revenue.xml"), "utf8");
 writeFileSync(join(samples, "samples.json"), JSON.stringify({ tables, specs, legacy, powercenter }, null, 2));
 
-console.log(`engine ready: pyodide, ${wheel}, redcliff.zip, ${tables.length} sample tables, ${Object.keys(specs).length} specs`);
+// 5. Precomputed lineage, row counts and blast radius for the examples, so the canvas is
+//    interactive while Python and DuckDB load. Optional: needs sqlglot and duckdb in $PYTHON.
+let precomputed = "skipped (install core/[cli] in $PYTHON to enable)";
+try {
+  execFileSync(python, [join(web, "scripts", "precompute.py"), samples, join(samples, "precomputed.json")], {
+    env: { ...process.env, PYTHONPATH: join(repo, "core", "src") },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  precomputed = "precomputed examples";
+} catch (e) {
+  writeFileSync(join(samples, "precomputed.json"), "{}");
+  console.warn(`precompute ${precomputed}: ${String(e.stderr || e).split("\n").filter(Boolean).pop()}`);
+}
+
+console.log(`engine ready: pyodide, ${wheel}, redcliff.zip, ${tables.length} sample tables, ${Object.keys(specs).length} specs, ${precomputed}`);
