@@ -143,7 +143,16 @@ digits and underscores, or a value that isn't text, a number or true/false.
 - Required fields, known node types, valid ids, no duplicate ids.
 - Input counts per type, inputs that exist, no reading from a target, no cycles.
 - Every SQL expression parses.
+- A `table` is a table name: `name`, `schema.name` or `catalog.schema.name`. The pipeline `name`,
+  and every `path`, is one line.
+- Spec SQL reads files only through source steps: expressions, `sql` steps and expectation
+  conditions can't call table functions such as `read_text(...)` or `read_csv(...)`, or read a
+  quoted file name such as `'data.csv'`.
 - It reports every problem at once, not just the first.
+
+Specs travel (share links, pull requests, imported files), so these checks keep a spec from someone
+else to data plus SQL expressions: nothing in it becomes an extra SQL statement, Python or Jinja in
+the generated code.
 
 Column-level checks (an unknown or ambiguous column, a union whose inputs have different
 widths) come from `redcliff.column_issues`, which needs declared source columns.

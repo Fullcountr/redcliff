@@ -32,14 +32,23 @@ def _ports_of(defn: ET.Element | None) -> list[str]:
     return [(f.get("NAME") or "").upper() for f in defn.findall("TRANSFORMFIELD")] if defn is not None else []
 
 
+MAX_MAPPLET_INSTANCES = 10_000  # per mapping, after flattening: real exports stay far below this
+
+
 def flatten_mapplets(mapping: ET.Element, mapplets: dict[str, ET.Element], display: dict[str, str],
-                     transforms: dict[str, ET.Element], depth: int = 0) -> tuple[ET.Element, list[str]]:
+                     transforms: dict[str, ET.Element], depth: int = 0, _chain: tuple[str, ...] = (),
+                     _budget: list[int] | None = None) -> tuple[ET.Element, list[str]]:
     """A copy of ``mapping`` with every mapplet instance replaced by the mapplet's contents.
 
     Returns the copy and the names of mapplets that couldn't be found (left in place, so the
     converter marks them manual). ``display`` maps flattened instance names to readable ones
     such as ``MPLT_CLEAN/EXP_TRIM``.
+
+    A mapplet that contains itself (directly or through others), or a mapping that would flatten
+    to more than MAX_MAPPLET_INSTANCES instances, is left in place too, so a small export can't
+    expand exponentially.
     """
+    budget = [MAX_MAPPLET_INSTANCES] if _budget is None else _budget
     flat = copy.deepcopy(mapping)
     missing: list[str] = []
     for inst in list(flat.findall("INSTANCE")):
@@ -48,11 +57,15 @@ def flatten_mapplets(mapping: ET.Element, mapplets: dict[str, ET.Element], displ
         outer = (inst.get("NAME") or "").upper()
         mplt_name = (inst.get("TRANSFORMATION_NAME") or outer).upper()
         mplt = mapplets.get(mplt_name)
-        if mplt is None or depth > 8:
+        if mplt is None or depth > 8 or mplt_name in _chain or budget[0] <= 0:
             missing.append(mplt_name)
             continue
-        inner, more = flatten_mapplets(mplt, mapplets, display, transforms, depth + 1)
+        inner, more = flatten_mapplets(mplt, mapplets, display, transforms, depth + 1, _chain + (mplt_name,), budget)
         missing += more
+        budget[0] -= len(inner.findall("INSTANCE"))
+        if budget[0] < 0:
+            missing.append(mplt_name)
+            continue
         prefix = f"{outer}__"
         local = {(t.get("NAME") or "").upper() for t in inner.findall("TRANSFORMATION")}
 

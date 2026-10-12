@@ -138,9 +138,14 @@ def parse_expectations(node_id: str, raw: Any) -> tuple[list[Expectation], list[
                 problems.append(f"{where}: condition takes a SQL expression")
                 continue
             try:
-                sqlglot.parse_one(value)
+                tree = sqlglot.parse_one(value)
             except ParseError as err:
                 problems.append(f"{where}: condition is not valid SQL: {str(err).splitlines()[0]}")
+                continue
+            from redcliff.spec import file_reads
+
+            if file_reads(tree):
+                problems.append(f"{where}: condition reads {file_reads(tree)[0]!r}; check the step's own columns")
                 continue
             e.condition = value
         elif kind == "row_count":

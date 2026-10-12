@@ -35,7 +35,7 @@ from redcliff.compile import (
     _source_relation,
     _transpile,
 )
-from redcliff.spec import Pipeline, bind
+from redcliff.spec import Pipeline, bind, file_reads
 
 PREFIX = "__rc_"
 ROWNUM = "__rc_row"
@@ -180,6 +180,8 @@ def trace_rows(con, pipeline: Pipeline, node_id: str, where: str | None = None, 
     Returns [{"row": {column: value}, "sources": {source id: [{column: value}, ...]}}].
     """
     tq = trace_query(pipeline, node_id, base_dir)
+    if where and file_reads(sqlglot.parse_one(where)):
+        raise CompileError(f"the condition reads {file_reads(sqlglot.parse_one(where))[0]!r}; filter on the step's columns")
     sql = f"SELECT * FROM ({tq.sql})" + (f" WHERE {_expr(where, 'duckdb')}" if where else "")
     rel = con.sql(sql)
     names = rel.columns

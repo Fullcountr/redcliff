@@ -24,7 +24,7 @@ from sqlglot import exp
 
 from redcliff.columns import infer_columns
 from redcliff.expect import expectations
-from redcliff.compile import _node_body
+from redcliff.compile import _literal, _node_body, _one_line
 from redcliff.lineage import Ref, build_graph, trace_to_sources
 from redcliff.spec import Node, Pipeline, bind
 
@@ -36,6 +36,15 @@ SOURCE_GROUP = "raw"
 def _slug(name: str) -> str:
     s = re.sub(r"[^a-z0-9_]", "_", name.lower()).strip("_") or "pipeline"
     return s if s[0].isalpha() else "p_" + s
+
+
+_JINJA_OPEN = re.compile(r"\{[{%#]")
+
+
+def _jinja_literal(text: str) -> str:
+    """Spec-derived text that dbt's Jinja renders back as itself: '{{', '{%' and '{#' become
+    {{ '{{' }} and so on. Redcliff's own ref/source/var tokens hold no braces and are swapped in after."""
+    return _JINJA_OPEN.sub(lambda m: "{{ '" + m.group(0) + "' }}", text)
 
 
 def _yaml_str(text: str) -> str:
@@ -107,7 +116,7 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
                 return exp.Table(this=exp.to_identifier(token), alias=exp.TableAlias(this=exp.to_identifier(alias)))
             return n
 
-        text = tree.transform(swap).sql(dialect, pretty=True)
+        text = _jinja_literal(tree.transform(swap).sql(dialect, pretty=True))
         for token, rel in refs.items():
             text = re.sub(rf'["`]?{token}["`]?', lambda _m, r=rel: r, text)
         return text
@@ -162,7 +171,7 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
         lines = ["version: 2", "seeds:"]
         for n in seeds:
             lines.append(f"  - name: {n.id}")
-            lines.append(f"    description: Loaded from {n.params['path']}")
+            lines.append(f"    description: {_yaml_str(_jinja_literal('Loaded from ' + _one_line(n.params['path'])))}")
             if n.params.get("columns"):
                 lines.append("    config:")
                 lines.append("      column_types:")
@@ -175,10 +184,11 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
 
     for n in pipeline.nodes:
         if n.type == "source" and n.params["format"] == "parquet":
-            path = _yaml_str(n.params["path"])[1:-1]
-            read = f"read_parquet('{path}')" if dialect == "duckdb" else f"parquet.`{path}`"
+            path = n.params["path"]
+            read = f"read_parquet({_literal(path)})" if dialect == "duckdb" else \
+                f"parquet.`{path.replace('`', '``')}`"
             view = "{{ config(materialized='view') }}\n" if n.expect else ""
-            files[f"models/{model_name[n.id]}.sql"] = f"-- {n.id}: source (parquet)\n{view}SELECT * FROM {read}\n"
+            files[f"models/{model_name[n.id]}.sql"] = f"-- {n.id}: source (parquet)\n{view}SELECT * FROM {_jinja_literal(read)}\n"
 
     # ------------------------------------------------------------------ steps and targets
     docs = ["version: 2", "models:"]
@@ -205,21 +215,22 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
                 if _table_name(p["table"])[0]:
                     config.append(f"schema='{_table_name(p['table'])[0]}'")
             elif adapter == "duckdb":
-                config += ["materialized='external'", f"location='{p['path']}'", f"format='{p['format']}'"]
+                config += ["materialized='external'", f"location={p['path']!r}", f"format='{p['format']}'"]
                 folder = Path(p["path"]).parent
-                if str(folder) not in ("", ".") and not folder.is_absolute():
+                if str(folder) not in ("", ".") and not folder.is_absolute() and ".." not in folder.parts:
                     files[f"{folder.as_posix()}/.gitkeep"] = ""  # DuckDB writes files but not folders
             else:
                 config.append("materialized='table'")
             for key, hook in (("pre_sql", "pre_hook"), ("post_sql", "post_hook")):
-                statements = [sqlglot.transpile(s, write=dialect)[0] for s in p.get(key) or []]
+                statements = [_jinja_literal(sqlglot.transpile(s, write=dialect)[0]) for s in p.get(key) or []]
                 if statements:
                     config.append(f"{hook}={statements!r}")
             note = "" if p["format"] == "table" or adapter == "duckdb" else \
-                f"-- Redcliff writes {p['path']}; dbt materializes a table here. Unload it with your platform's tools.\n"
+                f"-- Redcliff writes {_jinja_literal(_one_line(p['path']))}; dbt materializes a table here. " \
+                "Unload it with your platform's tools.\n"
             body = f"SELECT * FROM {relation(node.inputs[0])}\n"
             if p.get("mode") == "merge" and p.get("delete_when"):
-                cond = sqlglot.parse_one(p["delete_when"]).sql(dialect)
+                cond = _jinja_literal(sqlglot.parse_one(p["delete_when"]).sql(dialect))
                 note += (f"-- Redcliff deletes matched rows where {cond}; dbt's incremental merge doesn't delete,\n"
                          "-- so those rows are left out here. Delete them with a post_hook or a separate job.\n")
                 body += f"WHERE NOT ({cond})\n"
@@ -239,10 +250,11 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
     for e in expectations(pipeline):
         node = by_id[e.node]
         rel = relation(e.node) if node.type != "target" else f"{{{{ ref('{model_name[e.node]}') }}}}"
-        sql = sqlglot.transpile(e.failing_sql("__rc_relation__"), write=dialect, pretty=True)[0]
+        sql = _jinja_literal(sqlglot.transpile(e.failing_sql("__rc_relation__"), write=dialect, pretty=True)[0])
         sql = re.sub(r'["`]?__rc_relation__["`]?', lambda _m, r=rel: r, sql)
         config = "{{ config(severity='warn') }}\n" if e.severity == "warn" else ""
-        files[f"tests/{e.node}__{e.name}.sql"] = f"-- {e.node}: expect {e.describe()}\n{config}{sql}\n"
+        files[f"tests/{e.node}__{e.name}.sql"] = \
+            f"-- {e.node}: expect {_jinja_literal(_one_line(e.describe()))}\n{config}{sql}\n"
 
     if variables:
         token = re.compile(r'["`]?__rcvar_([A-Za-z0-9_]+?)__["`]?', re.IGNORECASE)
@@ -252,11 +264,22 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
     return files
 
 
+def project_path(out_dir: str | Path, rel: str) -> Path:
+    """Where a generated project file goes; refuses names that would land outside ``out_dir``."""
+    root = Path(out_dir).resolve()
+    path = (root / rel).resolve()
+    if Path(rel).is_absolute() or (path != root and root not in path.parents):
+        raise ValueError(f"refusing to write {rel!r}: it is outside {out_dir}")
+    return path
+
+
 def write_dbt_project(files: dict[str, str], out_dir: str | Path) -> list[Path]:
     """Write a project from :func:`compile_dbt` into ``out_dir``. Returns the paths written."""
     written = []
+    for rel in files:
+        project_path(out_dir, rel)  # check every name before writing anything
     for rel, content in files.items():
-        path = Path(out_dir) / rel
+        path = project_path(out_dir, rel)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         written.append(path)
