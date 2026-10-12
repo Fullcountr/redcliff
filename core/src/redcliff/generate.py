@@ -27,7 +27,7 @@ import sqlglot
 from sqlglot import exp
 
 from redcliff.model import Entity, Model, validate_model
-from redcliff.spec import Pipeline, SpecError
+from redcliff.spec import ID_PATTERN, Pipeline, SpecError
 
 DATE_PARTS = {"year": "YEAR(d)", "quarter": "QUARTER(d)", "month": "MONTH(d)", "day": "DAY(d)",
               "day_of_month": "DAY(d)", "day_of_year": "DAYOFYEAR(d)", "week_of_year": "WEEKOFYEAR(d)"}
@@ -45,14 +45,49 @@ def _rel(entity_source: str, model_dir: Path, spec_dir: Path) -> str:
     return os.path.relpath((model_dir / entity_source).resolve(), spec_dir.resolve()).replace(os.sep, "/")
 
 
+def _csv_header(path: Path) -> list[str] | None:
+    """A CSV file's column names, when it exists and they're all plain names."""
+    import csv
+
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            header = next(csv.reader(f), None)
+    except OSError:
+        return None
+    names = [h.strip() for h in header or []]
+    return names if names and all(ID_PATTERN.match(n) for n in names) and len(set(names)) == len(names) else None
+
+
 def _source_node(e: Entity, model_dir: Path, spec_dir: Path) -> dict:
+    """The source step for an entity. CSV columns are declared from the file's header (typed like the
+    attributes they map to, else varchar; the
+    staging step casts them), so lineage runs from the file's columns to the model's attributes."""
     src = e.source
     suffix = Path(src).suffix.lower()
     if suffix in (".csv", ".parquet"):
-        params = {"format": suffix[1:], "path": _rel(src, model_dir, spec_dir)}
+        params: dict[str, Any] = {"format": suffix[1:], "path": _rel(src, model_dir, spec_dir)}
+        header = _csv_header(model_dir / src) if suffix == ".csv" else None
+        if header:
+            params["columns"] = {c: _raw_type(e, c) for c in header}
     else:
         params = {"format": "table", "table": src}
     return {"id": f"src_{e.id}", "type": "source", "params": params}
+
+
+def _raw_type(e: Entity, column: str) -> str:
+    """The type to read a file column as: the type of the attribute it maps to, else varchar."""
+    for a in e.attributes:
+        if a.source == column or (a.source is None and a.name == column):
+            return exp.DataType.build(a.type).sql()
+    return "VARCHAR"
+
+
+def _table_source(node_id: str, e: Entity) -> dict:
+    """A source step reading an entity's loaded table, with its columns declared from the model."""
+    cols = {a.name: exp.DataType.build(a.type).sql() for a in e.attributes}
+    if e.scd2:
+        cols.update({"valid_from": "TIMESTAMP", "valid_to": "TIMESTAMP", "is_current": "BOOLEAN"})
+    return {"id": node_id, "type": "source", "params": {"format": "table", "table": e.id, "columns": cols}}
 
 
 def _cast(expr: str, type_name: str) -> str:
@@ -177,7 +212,7 @@ def _kimball_nodes(model: Model, model_dir: Path, spec_dir: Path) -> list[dict]:
         if lookups:
             date_attr = next((a.name for a in e.attributes if a.name not in skip
                               and exp.DataType.build(a.type).is_type(*exp.DataType.TEMPORAL_TYPES)), None)
-            select, joins = [], []
+            select, joins, lookup_inputs = [], [], []
             dim_sk = {a.name: _generated_sk(dim) for a, dim, _x in lookups}
             for a in e.attributes:
                 if a.name in skip:
@@ -189,20 +224,23 @@ def _kimball_nodes(model: Model, model_dir: Path, spec_dir: Path) -> list[dict]:
                 bk = _business_keys(dim)[0]
                 on = f"{alias}.{bk} = f.lookup_{a.name}"
                 source = f"lookup_{a.name}"
+                nodes.append(_table_source(f"lookup_{a.name}", dim))
                 if dim.scd2 and date_attr:  # the version valid on the row's date (as it was)
                     # a key's first version counts from the beginning, so older rows find it (dbt snapshots
                     # start first versions when they first run)
-                    source = (f"(SELECT *, CASE WHEN valid_from = MIN(valid_from) OVER (PARTITION BY {bk}) "
-                              f"THEN TIMESTAMP '1900-01-01 00:00:00' ELSE valid_from END AS pit_from FROM lookup_{a.name})")
+                    names = ", ".join([*(x.name for x in dim.attributes), "valid_from", "valid_to"])
+                    nodes.append({"id": f"pit_{a.name}", "type": "sql", "inputs": [source], "params": {"query": (
+                        f"SELECT {names}, CASE WHEN valid_from = MIN(valid_from) OVER (PARTITION BY {bk}) "
+                        f"THEN TIMESTAMP '1900-01-01 00:00:00' ELSE valid_from END AS pit_from FROM {source}")}})
+                    source = f"pit_{a.name}"
                     on += (f" AND f.{date_attr} >= {alias}.pit_from"
                            f" AND ({alias}.valid_to IS NULL OR f.{date_attr} < {alias}.valid_to)")
                 elif dim.scd2:
                     on += f" AND {alias}.valid_to IS NULL"
                 joins.append(f"LEFT JOIN {source} AS {alias} ON {on}")
-                nodes.append({"id": f"lookup_{a.name}", "type": "source",
-                              "params": {"format": "table", "table": dim.id}})
+                lookup_inputs.append(source)
             nodes.append({"id": f"keyed_{e.id}", "type": "sql",
-                          "inputs": [f"stg_{e.id}"] + [f"lookup_{a.name}" for a, _d, _x in lookups],
+                          "inputs": [f"stg_{e.id}"] + lookup_inputs,
                           "params": {"query": f"SELECT {', '.join(select)} FROM stg_{e.id} AS f " + " ".join(joins)}})
             last = f"keyed_{e.id}"
         else:
@@ -213,6 +251,14 @@ def _kimball_nodes(model: Model, model_dir: Path, spec_dir: Path) -> list[dict]:
         nodes.append({"id": e.id, "type": "target", "inputs": [last], "params": params})
     seen: set[str] = set()  # the date dimension and its facts share their source steps
     return [n for n in nodes if not (n["id"] in seen or seen.add(n["id"]))]
+
+
+def _with_date(expr: str, date_sql: str) -> str:
+    """``expr`` with its column ``d`` replaced by ``date_sql``."""
+    replacement = sqlglot.parse_one(date_sql)
+    tree = sqlglot.parse_one(expr).transform(
+        lambda n: replacement.copy() if isinstance(n, exp.Column) and n.name == "d" and not n.table else n)
+    return tree.sql()
 
 
 def _date_dimension(model: Model, e: Entity, model_dir: Path, spec_dir: Path) -> list[dict]:
@@ -232,23 +278,26 @@ def _date_dimension(model: Model, e: Entity, model_dir: Path, spec_dir: Path) ->
             continue
         if f"src_{fact.id}" not in inputs:
             inputs.append(f"src_{fact.id}")
-        selects.append(f"SELECT CAST({column} AS DATE) AS d FROM src_{fact.id}")
+        selects.append((f"CAST({column} AS DATE)", f"src_{fact.id}", column))
     if not selects:
         raise GenerateError(f"{e.id}: no fact refers to it with a date (e.g. YEAR(order_date) * 10000 + ...)")
     sources = []
     for fid in inputs:
         fact = model.entity(fid[4:])
         sources.append(_source_node(fact, model_dir, spec_dir))
-    cols = []
-    for a in e.attributes:
-        if a.role == "business_key":
-            expr = "d"
-        elif a.role == "surrogate_key":
-            expr = DATE_KEY
-        else:
-            expr = DATE_PARTS.get(a.name, "NULL")
-        cols.append(f"{_cast(expr, a.type)} AS {a.name}")
-    query = f"SELECT DISTINCT {', '.join(cols)} FROM ({' UNION '.join(selects)}) AS dates WHERE d IS NOT NULL"
+    branches = []
+    for d, src, column in selects:
+        cols = []
+        for a in e.attributes:
+            if a.role == "business_key":
+                expr = "d"
+            elif a.role == "surrogate_key":
+                expr = DATE_KEY
+            else:
+                expr = DATE_PARTS.get(a.name, "NULL")
+            cols.append(f"{_cast(_with_date(expr, d), a.type)} AS {a.name}")
+        branches.append(f"SELECT DISTINCT {', '.join(cols)} FROM {src} WHERE {column} IS NOT NULL")
+    query = " UNION ".join(branches)
     stg = {"id": f"stg_{e.id}", "type": "sql", "inputs": inputs, "params": {"query": query},
            "expect": _key_expect([bk.name])}
     return sources + [stg]
@@ -334,17 +383,19 @@ def _marts(model: Model) -> list[dict]:
         select = [f"h.{hk}"] + [f"h.{b}" for b in bks]
         joins = []
         inputs = [f"mart_{hub.id}"]
-        nodes.append({"id": f"mart_{hub.id}", "type": "source", "params": {"format": "table", "table": hub.id}})
+        nodes.append(_table_source(f"mart_{hub.id}", hub))
         for i, sat in enumerate(sats):
             sat_hk = next(r.source.split(".")[1] for r in model.relationships
                           if r.source.split(".")[0] == sat.id and r.target == f"{hub.id}.{hk}")
             cols = [a.name for a in sat.attributes if a.role is None and a.name not in ("load_dts", "record_source", "hashdiff")]
             alias = f"s{i}"
             select += [f"{alias}.{c}" for c in cols if c not in bks]
-            nodes.append({"id": f"mart_{sat.id}", "type": "source", "params": {"format": "table", "table": sat.id}})
-            inputs.append(f"mart_{sat.id}")
-            joins.append(f"LEFT JOIN (SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY {sat_hk} ORDER BY load_dts DESC) "
-                         f"AS rn FROM mart_{sat.id}) AS ranked WHERE rn = 1) AS {alias} ON {alias}.{sat_hk} = h.{hk}")
+            nodes.append(_table_source(f"mart_{sat.id}", sat))
+            names = ", ".join(a.name for a in sat.attributes)
+            nodes.append({"id": f"latest_{sat.id}", "type": "sql", "inputs": [f"mart_{sat.id}"], "params": {"query": (
+                f"SELECT {names}, ROW_NUMBER() OVER (PARTITION BY {sat_hk} ORDER BY load_dts DESC) AS rn FROM mart_{sat.id}")}})
+            inputs.append(f"latest_{sat.id}")
+            joins.append(f"LEFT JOIN latest_{sat.id} AS {alias} ON {alias}.{sat_hk} = h.{hk} AND {alias}.rn = 1")
         nodes.append({"id": f"{name}_current_rows", "type": "sql", "inputs": inputs,
                       "params": {"query": f"SELECT {', '.join(select)} FROM mart_{hub.id} AS h " + " ".join(joins)}})
         nodes.append({"id": f"{name}_current", "type": "target", "inputs": [f"{name}_current_rows"],

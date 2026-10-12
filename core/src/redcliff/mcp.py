@@ -36,7 +36,10 @@ join, aggregate, union, sql, target) whose expressions are SQL. The spec is the 
 code and lineage are generated from it, so edit specs, never generated code.
 Start with list_pipelines and describe_pipeline. Before changing a step, check impact on the
 columns it touches. To change a spec, call propose_edit, show the person the summary and the
-diff it returns, and call apply_edit only after they accept."""
+diff it returns, and call apply_edit only after they accept.
+Data models (model.yaml: entities, keys, relationships) are the target the loads produce:
+propose_model profiles data files and proposes one with reasons, generate_load proposes the
+pipeline that loads a model, describe_model reads one. Both proposals go through apply_edit."""
 
 
 class ToolError(Exception):
@@ -403,8 +406,12 @@ class Server:
             current = p.read_text(encoding="utf-8") if p.exists() else None
             if _hash(current) != prop["base"]:
                 raise ToolError(f"{prop['spec']} changed since the proposal; propose the edit again")
-            issues = _issues(Pipeline.from_dict(_yaml().safe_load(prop["text"]) if not prop["text"].lstrip()
-                                                .startswith("{") else json.loads(prop["text"])))
+            if prop.get("model"):
+                issues = _text_issues(prop["text"])
+            else:
+                text = prop["text"]
+                data = json.loads(text) if text.lstrip().startswith("{") else _yaml().safe_load(text)
+                issues = _issues(Pipeline.from_dict(data))
             if issues and not force:
                 raise ToolError("the proposed spec has problems; fix them, or pass force: true:\n" +
                                 "\n".join(f"- {i}" for i in issues))
@@ -412,6 +419,72 @@ class Server:
             p.write_text(prop["text"], encoding="utf-8")
             del self.proposals[proposal_id]
             return {"written": prop["spec"]}
+
+        @tool("describe_model", "Describe a data model", "A data model's entities (kind, keys, grain, history), "
+              "relationships and problems.", {"model": {**S, "description": "Model path, relative to the workspace root"}},
+              ["model"])
+        def describe_model(model):
+            from redcliff.model import load_model, validate_model
+
+            m = load_model(self.path(model))
+            return {"name": m.name, "style": m.style, "issues": [str(i) for i in validate_model(m)],
+                    "entities": [{"id": e.id, "kind": e.kind, "key": e.key(), "grain": e.grain,
+                                  "history": ("scd2" if e.scd2 else "scd1") if e.kind == "dimension" else None,
+                                  "attributes": [a.to_dict() for a in e.attributes]} for e in m.entities],
+                    "relationships": [r.to_dict() for r in m.relationships]}
+
+        def _propose_text(path: str, text: str, model: bool, report: str, summary: str, issues: list[str]) -> dict:
+            p = self.path(path)
+            before = p.read_text(encoding="utf-8") if p.exists() else ""
+            text_diff = "".join(difflib.unified_diff(before.splitlines(True), text.splitlines(True), f"a/{path}", f"b/{path}"))
+            pid = uuid.uuid4().hex[:12]
+            self.proposals[pid] = {"spec": path, "text": text, "base": _hash(before if p.exists() else None), "model": model}
+            return {"proposal_id": pid, "spec": path, "new_file": not p.exists(), "summary": summary, "issues": issues,
+                    "can_apply": not issues, "report": report, "diff": text_diff}
+
+        @tool("propose_model", "Propose a data model", "Profile CSV or Parquet files in the workspace (keys, nulls, "
+              "references between them) and propose a Kimball or Data Vault 2.0 model, with the reason for every "
+              "choice, as a proposal for a model file (apply it with apply_edit).",
+              {"files": {"type": "array", "items": S, "description": "Data files, relative to the root"},
+               "out": {**S, "description": "Where the model goes, e.g. models/sales.yaml"},
+               "name": S, "style": {"type": "string", "enum": ["kimball", "data_vault"], "default": "kimball"}},
+              ["files", "out"])
+        def propose_model(files, out, name=None, style="kimball"):
+            from redcliff.diff import diff_models
+            from redcliff.model import dump_model, load_model
+            from redcliff.propose import profile_files, to_data_vault
+
+            paths = [self.path(f) for f in files]
+            target = self.path(out)
+            proposal = profile_files(self.duck(), paths, base_dir=target.parent)
+            if style == "data_vault":
+                proposal = to_data_vault(proposal)
+            proposal.model.name = name or target.stem
+            base = load_model(target) if target.exists() else None
+            diff = diff_models(base, proposal.model)
+            result = _propose_text(out, dump_model(proposal.model), True, diff.to_markdown(f"Proposed model `{out}`", 3),
+                                   diff.summary(), diff.issues)
+            result["reasons"] = proposal.reasons
+            return result
+
+        @tool("generate_load", "Generate a model's load", "The pipeline that loads a data model (SCD2 dimensions, "
+              "point-in-time facts; or Data Vault hubs, links and satellites), as a proposal for a pipeline spec "
+              "(apply it with apply_edit).",
+              {"model": {**S, "description": "Model path, relative to the root"},
+               "out": {**S, "description": "Where the pipeline goes, e.g. pipelines/load_sales.yaml"}},
+              ["model", "out"])
+        def generate_load(model, out):
+            from redcliff.confine import OutsideRoot, check_paths
+            from redcliff.generate import GenerateError, model_pipeline
+            from redcliff.model import load_model
+
+            m_path, target = self.path(model), self.path(out)
+            try:
+                pipeline = model_pipeline(load_model(m_path), m_path.parent, target.parent)
+                check_paths(pipeline, target.parent, self.root)
+            except (GenerateError, SpecError, OutsideRoot) as e:
+                raise ToolError(str(e)) from None
+            return propose_edit(out, new_spec=dump_spec(pipeline, "yaml"), data=False)
 
         @tool("import_legacy", "Import legacy ETL", "Turn a legacy SQL script, an Informatica PowerCenter XML export "
               "or an SSIS .dtsx package "
@@ -515,6 +588,12 @@ def _issues(pipeline: Pipeline) -> list[str]:
     """Structural problems, then column problems (an unknown column, a clash)."""
     issues = [str(i) for i in validate(pipeline)]
     return issues or [str(i) for i in build_graph(pipeline).issues]
+
+
+def _text_issues(text: str) -> list[str]:
+    from redcliff.model import parse_model, validate_model
+
+    return [str(i) for i in validate_model(parse_model(text))]
 
 
 def _hash(text: str | None) -> str | None:

@@ -10,6 +10,13 @@ nodes:
   params:
     format: csv
     path: ../data/customers.csv
+    columns:
+      id: BIGINT
+      first_name: VARCHAR
+      last_name: VARCHAR
+      email: VARCHAR
+      region: VARCHAR
+      signup_date: DATE
 - id: stg_dim_customer
   type: sql
   inputs: [src_dim_customer]
@@ -37,14 +44,21 @@ nodes:
   params:
     format: csv
     path: ../data/orders.csv
+    columns:
+      order_id: BIGINT
+      customer_id: BIGINT
+      order_date: DATE
+      status: VARCHAR
+      amount: DECIMAL(10, 2)
 - id: stg_dim_date
   type: sql
   inputs: [src_fct_orders]
   params:
-    query: SELECT DISTINCT CAST(YEAR(d) * 10000 + MONTH(d) * 100 + DAY(d) AS INT) AS date_key, CAST(d
-      AS DATE) AS calendar_date, CAST(YEAR(d) AS INT) AS year, CAST(QUARTER(d) AS INT) AS quarter, CAST(MONTH(d)
-      AS INT) AS month, CAST(DAY(d) AS INT) AS day FROM (SELECT CAST(order_date AS DATE) AS d FROM src_fct_orders)
-      AS dates WHERE d IS NOT NULL
+    query: SELECT DISTINCT CAST(YEAR(CAST(order_date AS DATE)) * 10000 + MONTH(CAST(order_date AS DATE))
+      * 100 + DAY(CAST(order_date AS DATE)) AS INT) AS date_key, CAST(CAST(order_date AS DATE) AS DATE)
+      AS calendar_date, CAST(YEAR(CAST(order_date AS DATE)) AS INT) AS year, CAST(QUARTER(CAST(order_date
+      AS DATE)) AS INT) AS quarter, CAST(MONTH(CAST(order_date AS DATE)) AS INT) AS month, CAST(DAY(CAST(order_date
+      AS DATE)) AS INT) AS day FROM src_fct_orders WHERE order_date IS NOT NULL
   expect:
   - not_null: calendar_date
   - unique: calendar_date
@@ -74,16 +88,32 @@ nodes:
   params:
     format: table
     table: dim_customer
+    columns:
+      customer_key: BIGINT
+      customer_id: BIGINT
+      first_name: VARCHAR
+      last_name: VARCHAR
+      email: VARCHAR
+      region: VARCHAR
+      signup_date: DATE
+      valid_from: TIMESTAMP
+      valid_to: TIMESTAMP
+      is_current: BOOLEAN
+- id: pit_customer_key
+  type: sql
+  inputs: [lookup_customer_key]
+  params:
+    query: SELECT customer_key, customer_id, first_name, last_name, email, region, signup_date, valid_from,
+      valid_to, CASE WHEN valid_from = MIN(valid_from) OVER (PARTITION BY customer_id) THEN TIMESTAMP
+      '1900-01-01 00:00:00' ELSE valid_from END AS pit_from FROM lookup_customer_key
 - id: keyed_fct_orders
   type: sql
-  inputs: [stg_fct_orders, lookup_customer_key]
+  inputs: [stg_fct_orders, pit_customer_key]
   params:
     query: SELECT f.order_id, COALESCE(d_customer_key.customer_key, -1) AS customer_key, f.customer_id,
-      f.order_date_key, f.order_date, f.status, f.amount FROM stg_fct_orders AS f LEFT JOIN (SELECT *,
-      CASE WHEN valid_from = MIN(valid_from) OVER (PARTITION BY customer_id) THEN TIMESTAMP '1900-01-01
-      00:00:00' ELSE valid_from END AS pit_from FROM lookup_customer_key) AS d_customer_key ON d_customer_key.customer_id
-      = f.lookup_customer_key AND f.order_date >= d_customer_key.pit_from AND (d_customer_key.valid_to
-      IS NULL OR f.order_date < d_customer_key.valid_to)
+      f.order_date_key, f.order_date, f.status, f.amount FROM stg_fct_orders AS f LEFT JOIN pit_customer_key
+      AS d_customer_key ON d_customer_key.customer_id = f.lookup_customer_key AND f.order_date >= d_customer_key.pit_from
+      AND (d_customer_key.valid_to IS NULL OR f.order_date < d_customer_key.valid_to)
 - id: fct_orders
   type: target
   inputs: [keyed_fct_orders]

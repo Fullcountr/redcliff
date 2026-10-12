@@ -11,6 +11,13 @@ nodes:
   params:
     format: csv
     path: ../data/customers.csv
+    columns:
+      id: BIGINT
+      first_name: VARCHAR
+      last_name: VARCHAR
+      email: VARCHAR
+      region: VARCHAR
+      signup_date: VARCHAR
 - id: stg_hub_customer
   type: sql
   inputs: [src_hub_customer]
@@ -33,6 +40,12 @@ nodes:
   params:
     format: csv
     path: ../data/orders.csv
+    columns:
+      order_id: BIGINT
+      customer_id: VARCHAR
+      order_date: VARCHAR
+      status: VARCHAR
+      amount: VARCHAR
 - id: stg_hub_order
   type: sql
   inputs: [src_hub_order]
@@ -55,6 +68,12 @@ nodes:
   params:
     format: csv
     path: ../data/orders.csv
+    columns:
+      order_id: CHAR(32)
+      customer_id: CHAR(32)
+      order_date: VARCHAR
+      status: VARCHAR
+      amount: VARCHAR
 - id: stg_lnk_order_customer
   type: sql
   inputs: [src_lnk_order_customer]
@@ -79,6 +98,13 @@ nodes:
   params:
     format: csv
     path: ../data/customers.csv
+    columns:
+      id: CHAR(32)
+      first_name: VARCHAR
+      last_name: VARCHAR
+      email: VARCHAR
+      region: VARCHAR
+      signup_date: DATE
 - id: stg_sat_customer
   type: sql
   inputs: [src_sat_customer]
@@ -107,6 +133,12 @@ nodes:
   params:
     format: csv
     path: ../data/orders.csv
+    columns:
+      order_id: CHAR(32)
+      customer_id: VARCHAR
+      order_date: DATE
+      status: VARCHAR
+      amount: DOUBLE
 - id: stg_sat_order
   type: sql
   inputs: [src_sat_order]
@@ -134,19 +166,39 @@ nodes:
   params:
     format: table
     table: hub_customer
+    columns:
+      customer_hk: CHAR(32)
+      customer_id: BIGINT
+      load_dts: TIMESTAMP
+      record_source: VARCHAR
 - id: mart_sat_customer
   type: source
   params:
     format: table
     table: sat_customer
+    columns:
+      customer_hk: CHAR(32)
+      load_dts: TIMESTAMP
+      hashdiff: CHAR(32)
+      first_name: VARCHAR
+      last_name: VARCHAR
+      email: VARCHAR
+      region: VARCHAR
+      signup_date: DATE
+      record_source: VARCHAR
+- id: latest_sat_customer
+  type: sql
+  inputs: [mart_sat_customer]
+  params:
+    query: SELECT customer_hk, load_dts, hashdiff, first_name, last_name, email, region, signup_date,
+      record_source, ROW_NUMBER() OVER (PARTITION BY customer_hk ORDER BY load_dts DESC) AS rn FROM mart_sat_customer
 - id: customer_current_rows
   type: sql
-  inputs: [mart_hub_customer, mart_sat_customer]
+  inputs: [mart_hub_customer, latest_sat_customer]
   params:
     query: SELECT h.customer_hk, h.customer_id, s0.first_name, s0.last_name, s0.email, s0.region, s0.signup_date
-      FROM mart_hub_customer AS h LEFT JOIN (SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY
-      customer_hk ORDER BY load_dts DESC) AS rn FROM mart_sat_customer) AS ranked WHERE rn = 1) AS s0
-      ON s0.customer_hk = h.customer_hk
+      FROM mart_hub_customer AS h LEFT JOIN latest_sat_customer AS s0 ON s0.customer_hk = h.customer_hk
+      AND s0.rn = 1
 - id: customer_current
   type: target
   inputs: [customer_current_rows]
@@ -158,18 +210,36 @@ nodes:
   params:
     format: table
     table: hub_order
+    columns:
+      order_hk: CHAR(32)
+      order_id: BIGINT
+      load_dts: TIMESTAMP
+      record_source: VARCHAR
 - id: mart_sat_order
   type: source
   params:
     format: table
     table: sat_order
+    columns:
+      order_hk: CHAR(32)
+      load_dts: TIMESTAMP
+      hashdiff: CHAR(32)
+      order_date: DATE
+      status: VARCHAR
+      amount: DOUBLE
+      record_source: VARCHAR
+- id: latest_sat_order
+  type: sql
+  inputs: [mart_sat_order]
+  params:
+    query: SELECT order_hk, load_dts, hashdiff, order_date, status, amount, record_source, ROW_NUMBER()
+      OVER (PARTITION BY order_hk ORDER BY load_dts DESC) AS rn FROM mart_sat_order
 - id: order_current_rows
   type: sql
-  inputs: [mart_hub_order, mart_sat_order]
+  inputs: [mart_hub_order, latest_sat_order]
   params:
     query: SELECT h.order_hk, h.order_id, s0.order_date, s0.status, s0.amount FROM mart_hub_order AS h
-      LEFT JOIN (SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY order_hk ORDER BY load_dts DESC)
-      AS rn FROM mart_sat_order) AS ranked WHERE rn = 1) AS s0 ON s0.order_hk = h.order_hk
+      LEFT JOIN latest_sat_order AS s0 ON s0.order_hk = h.order_hk AND s0.rn = 1
 - id: order_current
   type: target
   inputs: [order_current_rows]

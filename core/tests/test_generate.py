@@ -141,7 +141,7 @@ def test_dbt_project_uses_a_snapshot_and_builds(tmp_path):
     assert "{% snapshot dim_customer %}" in snap and "check_cols=['email', 'region', 'signup_date']" not in snap
     assert "strategy='check'" in snap and "AS customer_key, *" in snap
     assert "snapshot-paths: [snapshots]" in files["dbt_project.yml"]
-    assert "{{ ref('dim_customer') }}" in files["models/int_keyed_fct_orders.sql"]  # built after the snapshot
+    assert any("{{ ref('dim_customer') }}" in text for path, text in files.items() if path.startswith("models/"))
     dbt = shutil.which("dbt") or str(Path(sys.executable).parent / "dbt")
     if not Path(dbt).exists():
         pytest.skip("dbt isn't installed")

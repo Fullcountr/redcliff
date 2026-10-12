@@ -245,6 +245,16 @@ def build_graph(pipeline: Pipeline) -> ColumnGraph:
                 for inp in node.inputs:
                     if pos < len(cols[inp]):
                         edge(Ref(inp, cols[inp][pos]), Ref(nid, c), DIRECT, "IDENTITY", False)
+    # A source that reads a table this pipeline writes (a fact looking up its dimension) continues the
+    # lineage of the target that writes it, so columns trace through to the files behind the table.
+    written = {n.params["table"]: n for n in pipeline.nodes
+               if n.type == "target" and n.params.get("format") == "table" and n.id in cols}
+    for node in pipeline.nodes:
+        target = written.get(node.params.get("table")) if node.type == "source" else None
+        if target is not None and node.id in cols:
+            for c in cols[node.id]:
+                if c in cols[target.id]:
+                    edge(Ref(target.id, c), Ref(node.id, c), DIRECT, "IDENTITY", False)
     return graph
 
 
@@ -332,7 +342,8 @@ def trace_to_sources(graph: ColumnGraph, ref: Ref) -> dict[Ref, tuple[str, str]]
     DIRECT subtype wins.
     """
     out: dict[Ref, tuple[str, str]] = {}
-    sources = {n.id for n in graph.pipeline.nodes if n.type == "source"}
+    fed = {e.dst.node for e in graph.edges}  # sources that read a table this pipeline writes aren't the end
+    sources = {n.id for n in graph.pipeline.nodes if n.type == "source" and n.id not in fed}
 
     def walk(r: Ref, acc: tuple[str, str] | None) -> None:
         if r.node in sources:

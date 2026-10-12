@@ -1,6 +1,6 @@
 # Data models
 
-Status: M1 to M4 done; M5 in progress.
+Status: M1 to M5 done. Next: legacy imports mapped onto a model.
 roadmap in the README tracks progress.
 
 ## The idea
@@ -135,6 +135,16 @@ current row per business key, no overlapping versions, and every reference resol
 
 Example: [`sales.yaml`](../examples/models/sales.yaml) → [`load_sales.yaml`](../examples/models/load_sales.yaml),
 and [`sales_vault.yaml`](../examples/models/sales_vault.yaml) → [`load_sales_vault.yaml`](../examples/models/load_sales_vault.yaml).
+
+## Lineage, diffs and agents (M5)
+
+- The generated loads declare their source columns (from the CSV header, typed like the attributes
+  they feed), so column lineage runs from the files to the model's attributes, and through tables a
+  load reads back (a fact's dimension lookup): `redcliff lineage load.yaml --column dim_date.year`.
+- `redcliff diff` (and so the pull request bot) reports a changed model file as a model: entities,
+  attributes and relationships added, removed or changed.
+- The MCP server has `describe_model`, `propose_model` (profile files, propose a model with reasons)
+  and `generate_load`; their results are proposals that `apply_edit` writes, like any edit.
 
 ## In the playground
 

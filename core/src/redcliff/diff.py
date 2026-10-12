@@ -318,3 +318,88 @@ def data_diff(base: Pipeline, head: Pipeline, con, base_dir=None, head_dir=None,
             d.note = f"rows not compared: {str(e).splitlines()[0]}"
         out.append(d)
     return out
+
+
+# --------------------------------------------------------------------------- data models
+
+
+@dataclass
+class ModelDiff:
+    """What a change to a data model does: entities, attributes and relationships."""
+
+    name: str
+    entities: list[tuple[str, str]] = field(default_factory=list)  # (entity, change)
+    attributes: list[tuple[str, str, str]] = field(default_factory=list)  # (entity, attribute, change)
+    relationships: list[str] = field(default_factory=list)
+    issues: list[str] = field(default_factory=list)  # problems in the new model
+    data: None = None  # a model has no rows to compare; keeps the same shape as PipelineDiff
+
+    @property
+    def empty(self) -> bool:
+        return not (self.entities or self.attributes or self.relationships or self.issues)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"kind": "model", **asdict(self)}
+
+    def summary(self) -> str:
+        parts = []
+        for label, n in (("entity change", len(self.entities)), ("attribute change", len(self.attributes)),
+                         ("relationship change", len(self.relationships)), ("issue", len(self.issues))):
+            if n:
+                parts.append(f"{n} {label}{'s' if n != 1 else ''}")
+        return ", ".join(parts) or "no changes"
+
+    def to_markdown(self, title: str | None = None, level: int = 2) -> str:
+        h = "#" * level
+        out = [f"{h} {title or self.name} (data model)", "", f"**{self.summary()}**", ""]
+        if self.entities:
+            out += ["| Entity | Change |", "| --- | --- |"] + [f"| `{e}` | {_cell(c)} |" for e, c in self.entities] + [""]
+        if self.attributes:
+            out += ["| Attribute | Change |", "| --- | --- |"]
+            out += [f"| `{e}.{a}` | {_cell(c)} |" for e, a, c in self.attributes] + [""]
+        if self.relationships:
+            out += [f"{h}# Relationships", ""] + [f"- {r}" for r in self.relationships] + [""]
+        if self.issues:
+            out += [f"{h}# Issues in the new model", ""] + [f"- {i}" for i in self.issues] + [""]
+        if self.empty:
+            out += ["No changes.", ""]
+        return "\n".join(out).rstrip() + "\n"
+
+
+def diff_models(base, head) -> ModelDiff:
+    """Compare two :class:`redcliff.model.Model`. ``base`` may be None (a new model)."""
+    from redcliff.model import Model, validate_model
+
+    base = base or Model(name=head.name, entities=[])
+    d = ModelDiff(head.name, issues=[str(i) for i in validate_model(head)])
+    before = {e.id: e for e in base.entities}
+    after = {e.id: e for e in head.entities}
+    for eid in after.keys() - before.keys():
+        e = after[eid]
+        d.entities.append((eid, f"**added**: {e.kind}, {len(e.attributes)} attributes"))
+    for eid in before.keys() - after.keys():
+        d.entities.append((eid, f"**removed** ({before[eid].kind})"))
+    for eid in [e.id for e in head.entities if e.id in before]:
+        old, new = before[eid].to_dict(), after[eid].to_dict()
+        changes = [f"{k}: {_short(old.get(k))} → {_short(new.get(k))}" for k in ("kind", "grain", "history", "source")
+                   if old.get(k) != new.get(k)]
+        if changes:
+            d.entities.append((eid, "**changed**: " + "; ".join(changes)))
+        oa = {a.name: a.to_dict() for a in before[eid].attributes}
+        na = {a.name: a.to_dict() for a in after[eid].attributes}
+        for name in [a.name for a in after[eid].attributes]:
+            if name not in oa:
+                d.attributes.append((eid, name, f"**added**: {na[name]['type']}"
+                                     + (f", {na[name]['role'].replace('_', ' ')}" if na[name].get("role") else "")))
+            elif oa[name] != na[name]:
+                keys = ("type", "role", "history", "track", "source", "description")
+                d.attributes.append((eid, name, "**changed**: " + "; ".join(
+                    f"{k}: {_short(oa[name].get(k))} → {_short(na[name].get(k))}" for k in keys
+                    if oa[name].get(k) != na[name].get(k))))
+        for name in oa.keys() - na.keys():
+            d.attributes.append((eid, name, "**removed**"))
+    old_r = {(r.source, r.target) for r in base.relationships}
+    new_r = {(r.source, r.target) for r in head.relationships}
+    d.relationships += [f"**added**: `{s}` → `{t}`" for s, t in sorted(new_r - old_r)]
+    d.relationships += [f"**removed**: `{s}` → `{t}`" for s, t in sorted(old_r - new_r)]
+    return d

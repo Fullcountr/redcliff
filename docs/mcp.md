@@ -43,6 +43,9 @@ Claude Desktop, Cursor and other clients take the same command in their JSON con
 | `trace_rows` | rows of a step with the source rows behind each one | no |
 | `propose_edit` | validates a change and returns what it does, plus a text diff | no |
 | `import_legacy` | turns a SQL script or PowerCenter export into a proposed new spec, with its scorecard | no |
+| `describe_model` | a data model's entities (kind, keys, grain, history), relationships and problems | no |
+| `propose_model` | profiles data files and proposes a Kimball or Data Vault model, with the reason for every choice, as a proposal | no |
+| `generate_load` | the pipeline that loads a model, as a proposal | no |
 | `apply_edit` | writes an accepted proposal | **yes** |
 
 ## Edits are proposals

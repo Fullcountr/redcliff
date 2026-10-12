@@ -518,10 +518,11 @@ adjust it on the canvas, and the pipelines that load it are generated from it.
 - [x] **M3** Generate the loads: SCD2 dimensions by default (type-1 attributes, noise columns
   ignored, Type 7 dual keys), facts with point-in-time key lookups and unknown members
 - [x] **M4** Data Vault 2.0: hubs, links and satellites with MD5 hash keys, and Kimball marts over the vault
-- [ ] **M5** Lineage, OpenLineage, importers, MCP tools and the PR bot all speak the model
+- [x] **M5** Lineage runs from files to model attributes; `redcliff diff`, the PR bot and the MCP server speak the model
 
 ### Also next
 
+- [ ] Legacy imports (SQL, PowerCenter, SSIS) mapped onto a proposed model
 - [ ] VS Code extension: the canvas and lineage next to the spec file
 - [ ] OpenLineage run events from `redcliff run`, so a catalog such as Marquez sees each run with its column lineage
 - [ ] Talend and IBM DataStage importers

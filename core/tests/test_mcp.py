@@ -46,7 +46,8 @@ def test_handshake_and_tool_list(server):
     tools = {t["name"]: t for t in server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]}
     assert set(tools) == {"list_pipelines", "describe_pipeline", "column_lineage", "impact", "compile", "preview",
                           "run_checks",
-                          "trace_rows", "propose_edit", "apply_edit", "import_legacy"}
+                          "trace_rows", "propose_edit", "apply_edit", "import_legacy",
+                          "describe_model", "propose_model", "generate_load"}
     assert tools["apply_edit"]["annotations"]["readOnlyHint"] is False
     assert all(t["annotations"]["readOnlyHint"] for n, t in tools.items() if n != "apply_edit")
     assert server.handle({"jsonrpc": "2.0", "id": 3, "method": "nope"})["error"]["code"] == -32601

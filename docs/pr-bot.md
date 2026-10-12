@@ -36,6 +36,9 @@ Each report has four parts:
 | Lineage | target columns whose source columns changed (a new column, a dropped one, or a rewired one) |
 | Data | with `--data`: every target runs on the sample data in the repository, before and after, in DuckDB; row counts, rows added and removed, and a few examples of each |
 
+A changed [data model](modeling.md) gets its own section: entities, attributes (type, role,
+history, tracking, source) and relationships added, removed or changed.
+
 It also lists problems in the new spec (an unknown column, a cycle), which `--fail-on-issues` turns
 into a failing exit code.
 
