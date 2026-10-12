@@ -254,9 +254,23 @@ function StepEditor({ step, issues, onApply }: {
 
 // ------------------------------------------------------------------ Data
 
+type Behind = { source: string; result: QueryResult }[];
+
+function isNumeric(result: QueryResult): boolean[] {
+  return result.columns.map((_, j) => result.rows.length > 0 && result.rows.every((r) => r[j] === null || typeof r[j] === "number" || /^-?\d+(\.\d+)?$/.test(String(r[j]))));
+}
+
+function Cell({ v }: { v: unknown }) {
+  return v === null ? <span className="null">null</span> : <>{String(v)}</>;
+}
+
 function DataPanel({ spec, selected, analysis, ready }: Props) {
   const nodeId = selected?.id ?? analysis?.order?.at(-1) ?? null;
   const [result, setResult] = useState<QueryResult | null>(null);
+  const [trace, setTrace] = useState<{ provenance: Record<string, string>; opaque: string[] }>({ provenance: {}, opaque: [] });
+  const [raw, setRaw] = useState<string[][]>([]); // each row's source row numbers, per source
+  const [picked, setPicked] = useState<number | null>(null);
+  const [behind, setBehind] = useState<Behind | null>(null);
   const [state, setState] = useState<{ loading: boolean; error: string | null; shown: string | null }>({
     loading: false, error: null, shown: null,
   });
@@ -264,42 +278,119 @@ function DataPanel({ spec, selected, analysis, ready }: Props) {
     if (!ready || !nodeId || !analysis?.valid) return;
     let live = true;
     setState((s) => ({ ...s, loading: true, error: null }));
+    setPicked(null);
+    setBehind(null);
     (async () => {
-      const q = await engine.previewQuery(spec, nodeId);
+      // The rows come with the source row numbers behind each one, so a click can trace it.
+      const q = await engine.traceQuery(spec, nodeId);
       if (!q.ok) throw new Error(q.error);
-      const r = await data.query(q.sql, 200);
-      if (live) {
-        setResult(r);
-        setState({ loading: false, error: null, shown: q.node });
-      }
+      const prov = Object.keys(q.provenance);
+      const sql = prov.length
+        ? `SELECT * REPLACE (${prov.map((c) => `array_to_string(${c}, ',') AS ${c}`).join(", ")}) FROM (${q.sql}) AS traced`
+        : q.sql;
+      const r = await data.query(sql, 200);
+      if (!live) return;
+      const at = prov.map((c) => r.columns.indexOf(c));
+      const keep = r.columns.map((_, j) => !at.includes(j));
+      setResult({ columns: r.columns.filter((_, j) => keep[j]), rows: r.rows.map((row) => row.filter((_, j) => keep[j])) });
+      setTrace({ provenance: q.provenance, opaque: q.opaque });
+      setRaw(r.rows.map((row) => at.map((j) => String(row[j] ?? ""))));
+      setState({ loading: false, error: null, shown: q.node });
     })().catch((e) => live && setState({ loading: false, error: String(e).replace(/^Error: /, ""), shown: null }));
     return () => { live = false; };
   }, [spec, nodeId, ready, analysis]);
 
+  const pick = async (i: number) => {
+    if (picked === i) { setPicked(null); setBehind(null); return; }
+    setPicked(i);
+    setBehind(null);
+    const sources = Object.values(trace.provenance);
+    const out: Behind = [];
+    for (const [k, source] of sources.entries()) {
+      const ids = (raw[i]?.[k] ?? "").split(",").filter(Boolean).map(Number);
+      const q = await engine.sourceRows(spec, source, ids);
+      if (!q.ok) continue;
+      out.push({ source, result: await data.query(q.sql) });
+    }
+    setBehind(out);
+  };
+
   if (!nodeId) return <p className="quiet">Add a step to preview its data.</p>;
   if (!ready) return <Starting what="DuckDB, which computes previews in this tab" />;
   if (analysis && !analysis.valid) return <p className="error">Fix the pipeline's issues to preview data.</p>;
-  const numeric = result?.columns.map((_, j) => result.rows.length > 0 && result.rows.every((r) => r[j] === null || typeof r[j] === "number" || /^-?\d+(\.\d+)?$/.test(String(r[j])))) ?? [];
+  const numeric = result ? isNumeric(result) : [];
+  const traceable = Object.keys(trace.provenance).length > 0;
   return (
-    <section className="data">
+    <section className={picked !== null ? "data has-pick" : "data"}>
       <div className="section-head">
         <h2 className="mono" style={{ fontSize: 14 }}>{state.shown ?? nodeId}</h2>
         <span className="chip">
           {state.loading ? "Running…" : result ? `${result.rows.length < 200 ? result.rows.length : "first 200"} rows` : ""}
         </span>
       </div>
-      <p className="quiet" style={{ fontSize: 12 }}>Computed by DuckDB in this tab. Select another step to preview it.</p>
+      <p className="quiet" style={{ fontSize: 12 }}>
+        Computed by DuckDB in this tab.{" "}
+        {traceable ? "Click a row to see the source rows behind it." : "Select another step to preview it."}
+      </p>
       {state.error && <p className="error">{state.error}</p>}
       {result && !state.error && (
         <div className="table-wrap">
-          <table>
+          <table className={traceable ? "traceable" : ""}>
             <thead><tr>{result.columns.map((c, j) => <th key={c} scope="col" className={numeric[j] ? "num" : ""}>{c}</th>)}</tr></thead>
             <tbody>
               {result.rows.map((r, i) => (
-                <tr key={i}>{r.map((v, j) => <td key={j} className={numeric[j] ? "num" : ""}>{v === null ? <span className="null">null</span> : String(v)}</td>)}</tr>
+                <tr
+                  key={i}
+                  className={picked === i ? "is-picked" : ""}
+                  onClick={traceable ? () => pick(i) : undefined}
+                  tabIndex={traceable ? 0 : undefined}
+                  onKeyDown={traceable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(i); } } : undefined}
+                  aria-selected={traceable ? picked === i : undefined}
+                >
+                  {r.map((v, j) => <td key={j} className={numeric[j] ? "num" : ""}><Cell v={v} /></td>)}
+                </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {picked !== null && (
+        <div className="behind" aria-live="polite">
+          <div className="section-head">
+            <h3>Behind this row</h3>
+            <button className="btn sm ghost" onClick={() => { setPicked(null); setBehind(null); }}>Clear</button>
+          </div>
+          {!behind && <p className="quiet">Tracing…</p>}
+          {behind?.map(({ source, result: rows }) => {
+            const num = isNumeric(rows);
+            return (
+              <div className="behind-source" key={source}>
+                <div className="behind-title">
+                  <span className="mono">{source}</span>
+                  <span className="chip">{rows.rows.length} {rows.rows.length === 1 ? "row" : "rows"}</span>
+                </div>
+                {rows.rows.length === 0 ? (
+                  <p className="quiet" style={{ fontSize: 12 }}>No row from {source}: an outer join found no match.</p>
+                ) : (
+                  <div className="table-wrap">
+                    <table>
+                      <thead><tr>{rows.columns.map((c, j) => <th key={c} scope="col" className={num[j] ? "num" : ""}>{c === "row" ? "#" : c}</th>)}</tr></thead>
+                      <tbody>
+                        {rows.rows.map((r, i) => (
+                          <tr key={i}>{r.map((v, j) => <td key={j} className={j === 0 ? "num rowno" : num[j] ? "num" : ""}><Cell v={v} /></td>)}</tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {behind && trace.opaque.length > 0 && (
+            <p className="quiet" style={{ fontSize: 12 }}>
+              Rows also pass through the SQL step {trace.opaque.join(", ")}, which a trace can't see inside.
+            </p>
+          )}
         </div>
       )}
     </section>

@@ -7,6 +7,7 @@
     redcliff compile pipeline.yaml --to dbt -o my_dbt_project       (or --to lakeflow)
     redcliff lineage pipeline.yaml --impact orders.status
     redcliff run pipeline.yaml --db warehouse.duckdb
+    redcliff trace pipeline.yaml out --where "region = 'South'"
 """
 
 from __future__ import annotations
@@ -202,6 +203,40 @@ def cmd_run(args) -> int:
     return 0
 
 
+def _cell(v) -> str:
+    return "" if v is None else str(v)
+
+
+def cmd_trace(args) -> int:
+    try:
+        import duckdb
+    except ImportError:
+        _err("trace needs DuckDB: pip install duckdb")
+        return 2
+    from redcliff.trace import trace_query, trace_rows
+
+    pipeline = load_spec(args.spec)
+    base = Path(args.spec).parent
+    con = duckdb.connect(args.db, read_only=True) if args.db else duckdb.connect()
+    tq = trace_query(pipeline, args.node, base)
+    for step in tq.opaque:
+        _err(f"note: rows pass through the sql step {step} untraced")
+    rows = trace_rows(con, pipeline, args.node, args.where, base)
+    if not rows:
+        print("no rows" + (f" where {args.where}" if args.where else ""))
+    for i, traced in enumerate(rows[: args.limit]):
+        if i:
+            print()
+        print(f"{tq.node}: " + ", ".join(f"{k}={_cell(v)}" for k, v in traced["row"].items()))
+        for source, src_rows in traced["sources"].items():
+            print(f"  from {source} ({len(src_rows)} row{'s' if len(src_rows) != 1 else ''}):")
+            for r in src_rows:
+                print(f"    #{r['row']}: " + ", ".join(f"{k}={_cell(v)}" for k, v in r.items() if k != "row"))
+    if len(rows) > args.limit:
+        print(f"\n... {len(rows) - args.limit} more rows; narrow them with --where")
+    return 0
+
+
 # --------------------------------------------------------------------------- entry point
 
 
@@ -249,6 +284,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--node", help="preview one node's rows instead of writing targets")
     p.add_argument("--limit", type=int, default=20)
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("trace", help="row-level trace: the source rows behind a step's rows")
+    p.add_argument("spec")
+    p.add_argument("node", help="the step (or target) whose rows to trace")
+    p.add_argument("--where", help="SQL condition picking the rows, e.g. \"region = 'South'\"")
+    p.add_argument("--db", help="DuckDB database file holding table sources")
+    p.add_argument("--limit", type=int, default=10)
+    p.set_defaults(func=cmd_trace)
     return parser
 
 

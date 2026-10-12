@@ -862,3 +862,17 @@ tbody tr:last-child td { border-bottom: 0; }
   background-size: 4px 4px, 4px 4px; background-repeat: no-repeat;
 }
 .file-select:focus-visible { outline: 2px solid var(--oxide-soft); outline-offset: 1px; }
+
+/* Data tab: row-level trace */
+table.traceable tbody tr { cursor: pointer; }
+table.traceable tbody tr:focus-visible { outline: none; }
+table.traceable tbody tr:focus-visible td { background: var(--hover); }
+tbody tr.is-picked td, tbody tr.is-picked:hover td { background: var(--oxide-soft); color: var(--text); }
+tbody tr.is-picked td:first-child { box-shadow: inset 2px 0 0 var(--oxide); }
+.data.has-pick > .table-wrap { max-height: 220px; }
+.behind { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--oxide-line); }
+.behind h3 { font-size: 13px; font-weight: 600; color: var(--oxide-strong); }
+.behind-source { margin-top: 10px; }
+.behind-title { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12.5px; font-weight: 600; }
+.behind .table-wrap { max-height: 260px; }
+td.rowno { color: var(--text-3); }

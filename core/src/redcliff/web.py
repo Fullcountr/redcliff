@@ -87,6 +87,23 @@ def preview_query(spec: Any, node_id: str) -> dict[str, Any]:
 
 
 @_wrap
+def trace_query(spec: Any, node_id: str) -> dict[str, Any]:
+    """DuckDB SQL for a step's rows, each with the source row numbers behind it."""
+    from redcliff.trace import trace_query as _trace_query
+
+    return _trace_query(_browser_paths(_load(spec)), node_id).to_dict()
+
+
+@_wrap
+def source_rows(spec: Any, source_id: str, rows: Any) -> dict[str, Any]:
+    """DuckDB SQL for some rows of a source, by row number."""
+    from redcliff.trace import source_rows_query
+
+    ids = json.loads(rows) if isinstance(rows, str) else list(rows)
+    return {"sql": source_rows_query(_browser_paths(_load(spec)), source_id, ids)}
+
+
+@_wrap
 def code(spec: Any, target: str, node_id: str | None = None) -> dict[str, Any]:
     """Generated code for the whole pipeline (or one node) in duckdb, spark or pyspark; or a whole
     project for dbt / lakeflow, as {"files": {path: content}}."""

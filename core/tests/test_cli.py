@@ -154,3 +154,12 @@ def test_compile_to_dbt_and_lakeflow(tmp_path, capsys):
     assert "# ==== spark-pipeline.yml" in out and "storage: s3a://bucket/x" in out
     assert "@dp.materialized_view" in out
     assert main(["compile", spec, "--to", "dbt", "--adapter", "oracle"]) == 1
+
+
+def test_trace_a_row_to_its_sources(capsys):
+    spec = str(ROOT / "examples" / "specs" / "orders_revenue.yaml")
+    assert main(["trace", spec, "out", "--where", "region = 'South'"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("revenue_by_region: region=South, revenue=330.50, order_count=3\n")
+    assert "  from orders (3 rows):\n    #1: order_id=1," in out
+    assert "#8: order_id=8" in out and "#2: order_id=2" not in out

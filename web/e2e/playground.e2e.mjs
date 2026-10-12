@@ -118,6 +118,17 @@ await step("selecting a step previews its data", async () => {
   await shot(page, "04-data");
 });
 
+await step("clicking a row traces it to the source rows behind it", async () => {
+  await page.locator(".data table tbody tr", { hasText: "South" }).first().click();
+  await page.waitForSelector(".behind-source");
+  const titles = await page.locator(".behind-title").allInnerTexts();
+  assert.deepEqual(titles.map((t) => t.replace(/\s+/g, " ").trim()), ["orders 3 rows", "customers 2 rows"]);
+  const orders = await page.locator(".behind-source").first().locator("tbody tr").allInnerTexts();
+  assert.ok(orders[0].includes("120.50") && orders[2].includes("10.00"), orders.join(" | "));
+  await shot(page, "04-trace");
+  await page.getByRole("button", { name: "Clear" }).click();
+});
+
 await step("code tab generates Spark SQL and PySpark", async () => {
   await page.getByRole("tab", { name: "Code" }).click();
   await page.waitForFunction(() => document.querySelector(".code-block")?.textContent?.includes("INSERT OVERWRITE"));

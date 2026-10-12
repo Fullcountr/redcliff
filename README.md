@@ -132,7 +132,8 @@ no lock-in: it's your code in your repo.
 <td valign="top">
 
 **Check it on real rows.** Every step shows its row count and previews its data, computed by
-DuckDB inside your browser. Drop in your own CSV files to try your own data. Share the whole
+DuckDB inside your browser. Click a row to see exactly which source rows are behind it. Drop in
+your own CSV files to try your own data. Share the whole
 pipeline as a link; there is no server to store it on.
 
 </td>
@@ -376,6 +377,7 @@ pipeline, connected through the tables its mappings write and read. The full lis
 | `redcliff compile pipeline.yaml --to dbt\|lakeflow -o DIR` | generate a dbt project or a Lakeflow Declarative Pipeline ([details](docs/outputs.md)) |
 | `redcliff lineage pipeline.yaml [--column N.C \| --impact N.C \| --openlineage N]` | lineage |
 | `redcliff run pipeline.yaml [--db file.duckdb] [--node ID]` | run or preview locally with DuckDB |
+| `redcliff trace pipeline.yaml STEP [--where COND]` | row-level trace: each row of a step with the source rows behind it |
 
 ---
 
@@ -413,6 +415,7 @@ flowchart LR
 | Spec | every validation rule, every example, round trips through YAML and JSON |
 | Compiler | generated DuckDB SQL runs on sample data and must match rows worked out by hand |
 | Lineage | each example's column map compared against one worked out by hand |
+| Row trace | tracing never changes a step's rows; every traced target row is rebuilt from only its source rows |
 | Importer | the original SQL and the imported, recompiled pipeline must return identical rows |
 | PowerCenter | the sample mapping runs in DuckDB and must match rows worked out by hand; the same job rebuilt with a mapplet, session, workflow and parameter file must return identical rows; every transformation type and scorecard status has a test |
 | Expressions | each Informatica expression runs in DuckDB and must return PowerCenter's answer |
@@ -469,7 +472,7 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 - [x] Mapplet expansion and session/workflow import (pre/post SQL, parameter files)
 - [x] Spark SQL and PySpark run against real Spark in CI
 - [x] dbt and Lakeflow pipeline outputs, both run in CI
-- [ ] Row-level trace: click an output row, see the input rows behind it
+- [x] Row-level trace: click an output row, see the input rows behind it
 - [ ] MCP server, so AI agents can edit pipelines and show a diff before you accept
 - [ ] Pull request bot: lineage and data diffs posted on every PR
 
