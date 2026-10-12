@@ -15,6 +15,7 @@ The output is a dict of relative path -> file content; :func:`write_dbt_project`
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -24,7 +25,7 @@ from sqlglot import exp
 from redcliff.columns import infer_columns
 from redcliff.compile import _node_body
 from redcliff.lineage import Ref, build_graph, trace_to_sources
-from redcliff.spec import Node, Pipeline
+from redcliff.spec import Node, Pipeline, bind
 
 ADAPTERS = {"duckdb": "duckdb", "spark": "spark", "databricks": "databricks", "snowflake": "snowflake",
             "bigquery": "bigquery", "postgres": "postgres", "redshift": "redshift"}
@@ -62,9 +63,14 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
         raise ValueError(f"unsupported dbt adapter {adapter!r}; expected one of {sorted(ADAPTERS)}")
     dialect = ADAPTERS[adapter]
     project = _slug(pipeline.name)
+    # Variables stay variables: dbt's var(), with the spec's values as defaults. SQL is generated
+    # from a copy holding a token per variable; analysis uses the real values.
+    variables = dict(pipeline.variables)
+    templated = bind(pipeline, {k: f"__rcvar_{k}__" for k in variables})
+    pipeline = bind(pipeline)
     cols = infer_columns(pipeline)
     graph = build_graph(pipeline)
-    by_id = {n.id: n for n in pipeline.nodes}
+    by_id = {n.id: n for n in templated.nodes}
     files: dict[str, str] = {}
 
     # dbt conventions: intermediate steps are int_ models; a target's model is named after its table.
@@ -117,6 +123,7 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
         "models:",
         f"  {project}:",
         "    +materialized: ephemeral  # steps compile into their targets' queries",
+        *(["vars:"] + [f"  {k}: {json.dumps(v)}" for k, v in variables.items()] if variables else []),
         "",
     ])
     if adapter == "duckdb":
@@ -172,7 +179,7 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
 
     # ------------------------------------------------------------------ steps and targets
     docs = ["version: 2", "models:"]
-    for node in pipeline.topo_order():
+    for node in templated.topo_order():
         if node.type == "source":
             continue
         if node.type != "target":
@@ -213,6 +220,11 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
                 docs.append(f"      - name: {c}")
                 docs.append(f"        description: {_yaml_str(_lineage_text(graph, documented, c))}")
     files["models/schema.yml"] = "\n".join(docs) + "\n"
+    if variables:
+        token = re.compile(r'["`]?__rcvar_([A-Za-z0-9_]+?)__["`]?', re.IGNORECASE)
+        by_lower = {k.lower(): k for k in variables}
+        files = {path: token.sub(lambda m: f'{{{{ var("{by_lower.get(m.group(1).lower(), m.group(1))}") }}}}', text)
+                 for path, text in files.items()}
     return files
 
 

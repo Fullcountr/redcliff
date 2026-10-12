@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlglot
 from sqlglot import exp
 
-from redcliff.spec import Node, Pipeline
+from redcliff.spec import Node, Pipeline, bind
 
 Columns = list[str] | None
 
@@ -63,6 +63,7 @@ def _sql_columns(query: str, inputs: list[Columns]) -> Columns:
 
 def infer_columns(pipeline: Pipeline) -> dict[str, Columns]:
     """Map every node id to its output column names, or None where they can't be known."""
+    pipeline = bind(pipeline)
     cols: dict[str, Columns] = {}
     for node in pipeline.topo_order():
         cols[node.id] = output_columns(node, [cols[i] for i in node.inputs])

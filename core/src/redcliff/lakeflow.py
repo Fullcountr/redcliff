@@ -20,8 +20,8 @@ import sqlglot
 from sqlglot import exp
 
 from redcliff.columns import infer_columns
-from redcliff.compile import _dataframe, _path, _statement, _transpile, _type_sql
-from redcliff.spec import Pipeline
+from redcliff.compile import variables_note, _dataframe, _path, _statement, _transpile, _type_sql
+from redcliff.spec import Pipeline, bind
 
 
 def _slug(name: str) -> str:
@@ -33,6 +33,8 @@ def compile_lakeflow(pipeline: Pipeline, base_dir: str | Path | None = None,
                      storage: str | None = None) -> dict[str, str]:
     """{relative path: content}. ``storage`` is the checkpoint root, an absolute URI such as
     ``file:///tmp/x`` or ``s3a://bucket/x``; without one the YAML gets a local placeholder."""
+    variables = dict(pipeline.variables)
+    pipeline = bind(pipeline)
     cols = infer_columns(pipeline)
     name = _slug(pipeline.name)
 
@@ -60,6 +62,7 @@ def compile_lakeflow(pipeline: Pipeline, base_dir: str | Path | None = None,
         "",
         "Generated from the pipeline spec; edit the spec, not this file. Runs on Databricks Lakeflow",
         'Declarative Pipelines and on open-source Spark 4.1+ ("spark-pipelines run").',
+        *([""] + variables_note(variables, "").rstrip("\n").splitlines() if variables else []),
         '"""',
         "",
         "from pyspark import pipelines as dp",
@@ -111,7 +114,8 @@ def compile_lakeflow(pipeline: Pipeline, base_dir: str | Path | None = None,
             lines += ["", "", f"@dp.temporary_view(name={dataset[node.id]!r})", f"def {fn}() -> DataFrame:",
                       f'    """{node.id}: {t}"""', f"    return {body}"]
     if job_notes:
-        lines[4:4] = ["", "Steps with no declarative form; run them as job tasks around the pipeline:"] + \
+        at = lines.index('"""')
+        lines[at:at] = ["", "Steps with no declarative form; run them as job tasks around the pipeline:"] + \
             [f"  - {n}" for n in job_notes]
     files = {
         "spark-pipeline.yml": "\n".join([

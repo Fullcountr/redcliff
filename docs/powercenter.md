@@ -89,7 +89,7 @@ playground's Migration tab.
 | Truncate target table option | the target's `mode: overwrite` (otherwise `append`) |
 | Target Pre SQL / Post SQL | the target's `pre_sql` / `post_sql`, translated from the target database's dialect; Spark SQL and PySpark run them |
 | Source qualifier Pre SQL / Post SQL | **review**: it runs on the source database, which Redcliff doesn't touch |
-| Parameter file | `$$PARAMS` resolved per session (`[folder.WF:wf.WT:worklet.ST:session]` beats `[folder.WF:wf.ST:session]` beats `[session]` beats `[folder.WF:wf]` beats `[Global]`), in expressions and in SQL text; each use is **review**, because the value is baked in |
+| Parameter file | `$$PARAMS` resolved per session (`[folder.WF:wf.WT:worklet.ST:session]` beats `[folder.WF:wf.ST:session]` beats `[session]` beats `[folder.WF:wf]` beats `[Global]`). A parameter used in an expression, or inside quotes in SQL text, becomes a [pipeline variable](spec.md#variables) (`$$MIN_ORDER_DATE` → `${min_order_date}`) with that value as its default. One used unquoted in SQL (a number, a list of columns) is written in as its value, and is **review** |
 | Workflow | sets the order of its sessions' mappings; the run order and link conditions are noted (**review**: recreate them in your orchestrator) |
 | Worklet | expanded in place: its sessions and tasks join the run order where it runs (`wklt_load/s_m_store_sales`), nested worklets too; `[folder.WF:wf.WT:worklet.ST:session]` parameter sections apply |
 | Command, Email, Timer, Event Wait/Raise, Control tasks | **manual**, with the command, address or condition in the note |
@@ -119,11 +119,11 @@ each target. Where SQL behaves differently, the translation keeps PowerCenter's 
 | `TO_DATE(s, 'MM/DD/YYYY')`, `TO_CHAR(d, 'YYYY-MM')` | `STR_TO_TIME`, `TIME_TO_STR` with converted formats | defaults to `MM/DD/YYYY HH24:MI:SS`, as PowerCenter does |
 | `ADD_TO_DATE`, `DATE_DIFF`, `GET_DATE_PART`, `TRUNC(date, 'MM')`, `LAST_DAY` | date arithmetic | `DATE_DIFF` in units other than days is **review** (PowerCenter returns fractions) |
 | `SUM(x, cond)`, `COUNT(x, cond)` | `SUM(CASE WHEN cond THEN x END)` | |
-| `$$PARAM` | the parameter's default value | **review**: make it a pipeline variable if it changes between runs |
+| `$$PARAM` | a pipeline variable, `${param}`, defaulting to the parameter's value | |
 | `ERROR(...)` | `NULL` | **review**: PowerCenter rejects the row |
 | `:LKP.name(...)`, `ABORT(...)`, `IS_DATE(...)`, unknown functions | `NULL` | **manual** |
 
-Also translated: `ISNULL`, `IS_SPACES`, `IS_NUMBER`, `IN`, `LTRIM`/`RTRIM` (with
+Also translated: `ISNULL`, `IS_SPACES`, `IS_NUMBER`, `IN` (with its case-insensitive flag), `LTRIM`/`RTRIM` (with
 trim sets), `UPPER`, `LOWER`, `LENGTH`, `INSTR`, `LPAD`, `RPAD`, `REPLACESTR`, `REPLACECHR`,
 `TO_DECIMAL`, `TO_FLOAT`, `ROUND`, `TRUNC`, `MOD`, `ABS`, `CEIL`, `FLOOR`, `POWER`, `SQRT`,
 `SYSDATE`, `SESSSTARTTIME`, `FIRST`, `LAST`, `MEDIAN`, `STDDEV`, `VARIANCE`, `REG_EXTRACT`,

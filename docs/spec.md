@@ -9,12 +9,14 @@ autocomplete; the Python validator adds checks a schema can't express.
 version: 0
 name: orders_revenue          # required
 description: optional text
+variables:                    # optional: defaults, overridable per run
+  status: shipped
 nodes:                        # required, at least one
   - id: shipped               # lowercase letters, digits, underscores
     type: filter              # one of the eight types below
     inputs: [orders]          # ids of upstream nodes
     params:
-      condition: status = 'shipped'
+      condition: status = '${status}'
 ```
 
 ## Conventions
@@ -57,6 +59,24 @@ Rules the compiler follows:
 
 Declaring `columns` on sources is optional but recommended: lineage and early error checks
 work best when Redcliff knows each source's schema.
+
+## Variables
+
+`variables` declares values a pipeline can take per run. `${name}` anywhere in a node's params
+(an expression, a path, a table name, pre/post SQL) is replaced by the value as text, the way a
+template is, before the spec is checked, analyzed or compiled. Quote it where SQL needs a string:
+`status = '${status}'`, `amount >= ${min_amount}`.
+
+| Where | What happens |
+| --- | --- |
+| `redcliff compile / run / trace / lineage --var status=pending` | overrides the default for that run |
+| Spark SQL, PySpark, DuckDB SQL, Lakeflow | the values are written into the code, listed in a header comment |
+| dbt | variables stay variables: `{{ var("status") }}`, with the defaults under `vars:` in `dbt_project.yml` |
+| PowerCenter import | a `$$PARAM` in an expression, or inside quotes in SQL, becomes a variable with the parameter file's value as its default |
+| `redcliff diff` | changed defaults are listed, and the data comparison uses each side's values |
+
+A variable that is used but not declared is an error; so is a name that isn't lowercase letters,
+digits and underscores, or a value that isn't text, a number or true/false.
 
 ## What the validator checks
 

@@ -23,7 +23,7 @@ import sqlglot
 from sqlglot import exp
 
 from redcliff.columns import infer_columns
-from redcliff.spec import Issue, Node, Pipeline
+from redcliff.spec import Issue, Node, Pipeline, bind
 
 DIRECT, INDIRECT = "DIRECT", "INDIRECT"
 _DIRECT_RANK = {"IDENTITY": 0, "TRANSFORMATION": 1, "AGGREGATION": 2}
@@ -145,6 +145,7 @@ def _name_check(node: Node, name: str, inp: str, columns: dict[str, list[str]], 
 
 def build_graph(pipeline: Pipeline) -> ColumnGraph:
     """The column-level lineage graph for a whole pipeline."""
+    pipeline = bind(pipeline)
     inferred = infer_columns(pipeline)
     # A target "has" its input's columns for lineage purposes.
     for node in pipeline.nodes:

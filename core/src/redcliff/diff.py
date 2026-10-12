@@ -67,12 +67,13 @@ class PipelineDiff:
     columns: list[ColumnChange] = field(default_factory=list)
     lineage: list[LineageChange] = field(default_factory=list)
     affected_targets: list[str] = field(default_factory=list)
+    variables: list[str] = field(default_factory=list)  # "name: 'a' → 'b'", "name 'a' added", ...
     issues: list[str] = field(default_factory=list)  # problems in the head spec
     data: list[DataChange] | None = None
 
     @property
     def empty(self) -> bool:
-        return not (self.steps or self.columns or self.lineage or self.issues
+        return not (self.steps or self.columns or self.lineage or self.issues or self.variables
                     or any(d.added or d.removed or d.rows_before != d.rows_after or d.note for d in self.data or []))
 
     def to_dict(self) -> dict[str, Any]:
@@ -84,6 +85,9 @@ class PipelineDiff:
             n = sum(s.change == kind for s in self.steps)
             if n:
                 parts.append(f"{n} step{'s' if n != 1 else ''} {kind}")
+        if self.variables:
+            n = len(self.variables)
+            parts.append(f"{n} variable{'s' if n != 1 else ''} changed")
         if self.lineage:
             n = len(self.lineage)
             parts.append(f"{n} target column{'s' if n != 1 else ''} with new lineage")
@@ -101,6 +105,8 @@ class PipelineDiff:
         out = [f"{h} {title or f'Pipeline `{self.name}`'}", "", f"**{self.summary()}**", ""]
         if self.issues:
             out += [f"{h}# Issues in the new spec", ""] + [f"- {i}" for i in self.issues] + [""]
+        if self.variables:
+            out += [f"{h}# Variables", ""] + [f"- {_cell(v)}" for v in self.variables] + [""]
         if self.steps:
             out += [f"{h}# Steps", "", "| Step | Change |", "| --- | --- |"]
             for s in self.steps:
@@ -131,7 +137,8 @@ class PipelineDiff:
                     out.append(f"- `{d.target}`: {d.note}")
                 for label, rows in (("added", d.added_sample), ("removed", d.removed_sample)):
                     if rows:
-                        out += ([""] if out[-1] else []) + [f"<details><summary><code>{d.target}</code>: rows {label}</summary>", "",
+                        summary = f"<details><summary><code>{d.target}</code>: rows {label}</summary>"
+                        out += ([""] if out[-1] else []) + [summary, "",
                                 "| " + " | ".join(d.columns) + " |", "|" + " --- |" * len(d.columns)]
                         out += ["| " + " | ".join(_cell(_fmt(v)) for v in r) + " |" for r in rows]
                         out += ["", "</details>"]
@@ -197,6 +204,8 @@ def diff_pipelines(base: Pipeline, head: Pipeline) -> PipelineDiff:
     """Structural, column and lineage changes from ``base`` to ``head``."""
     diff = PipelineDiff(name=head.name or base.name)
     diff.issues = [str(i) for i in validate(head)]
+    if isinstance(base.variables, dict) and isinstance(head.variables, dict):
+        diff.variables = _param_changes(base.variables, head.variables)
     before = {n.id: n for n in base.nodes}
     after = {n.id: n for n in head.nodes}
     changed: list[str] = []

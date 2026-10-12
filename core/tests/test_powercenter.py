@@ -258,7 +258,7 @@ def test_stateful_variable_port_is_manual():
     assert "previous row" in item.notes[0]
 
 
-def test_unconnected_input_port_is_null_and_parameters_use_defaults(con):
+def test_unconnected_input_port_is_null_and_parameters_become_variables(con):
     exp_ = transform("EXP_X", "Expression", [
         port("AMOUNT:decimal", "INPUT"), port("BONUS:decimal", "INPUT"),
         port("o_TOTAL:decimal", "OUTPUT", "IIF(ISNULL(BONUS), AMOUNT * $$RATE, AMOUNT + BONUS)"),
@@ -269,10 +269,14 @@ def test_unconnected_input_port_is_null_and_parameters_use_defaults(con):
                 ORDER_LINKS + ["SQ_ORDERS.AMOUNT -> EXP_X.AMOUNT", "EXP_X.o_TOTAL -> T.TOTAL"], variables)
     r = import_powercenter(export([m], [ORDERS], [target("T", "TOTAL:decimal")]))
     assert r.pipeline.node("exp_x").params == {
-        "columns": {"total": "CASE WHEN NULL IS NULL THEN amount * 2 ELSE amount + NULL END"}}
+        "columns": {"total": "CASE WHEN NULL IS NULL THEN amount * ${rate} ELSE amount + NULL END"}}
+    assert r.pipeline.variables == {"rate": "2"}
     item = next(i for i in r.scorecard.items if i.name == "EXP_X")
-    assert item.status == "review" and "$$RATE" in item.notes[0]
+    assert item.status == "converted"
+    assert "$$RATE is the pipeline variable ${rate}, default '2' from the mapping's default" in item.notes
     assert sorted(rows(con, r, r.outputs[0]))[0] == (Decimal("20.00"),)
+    r.pipeline.variables["rate"] = 3  # a different run
+    assert sorted(rows(con, r, r.outputs[0]))[0] == (Decimal("30.00"),)
 
 
 def test_two_sources_in_one_qualifier_with_a_user_defined_join(con):

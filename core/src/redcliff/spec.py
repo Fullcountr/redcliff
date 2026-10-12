@@ -4,6 +4,10 @@ A spec is a small document (YAML or JSON) with a name and a list of nodes. Each 
 ``id``, a ``type``, the ids of its ``inputs`` and type-specific ``params``. Expressions inside
 params are SQL strings, checked with sqlglot.
 
+A spec may declare ``variables`` with default values. ``${name}`` anywhere in a node's params is
+replaced by the variable's value (as text, like a template) before the spec is checked, analyzed
+or compiled; :func:`bind` does that, and takes overrides for a run.
+
 Everything here is pure Python so it also runs in the browser through Pyodide.
 """
 
@@ -21,6 +25,7 @@ from sqlglot.errors import ParseError
 
 SPEC_VERSION = 0
 ID_PATTERN = re.compile(r"^[a-z_][a-z0-9_]*$")
+VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 NODE_TYPES = ("source", "filter", "select", "derive", "join", "aggregate", "union", "sql", "target")
 FORMATS = ("csv", "parquet", "table")
@@ -72,6 +77,7 @@ class Pipeline:
     nodes: list[Node]
     version: int = SPEC_VERSION
     description: str = ""
+    variables: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Pipeline:
@@ -88,12 +94,16 @@ class Pipeline:
             nodes=[Node.from_dict(n) for n in nodes_raw],
             version=data.get("version", SPEC_VERSION),
             description=data.get("description", ""),
+            variables=dict(data.get("variables") or {}) if isinstance(data.get("variables") or {}, dict)
+            else data.get("variables"),
         )
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"version": self.version, "name": self.name}
         if self.description:
             out["description"] = self.description
+        if self.variables:
+            out["variables"] = dict(self.variables)
         out["nodes"] = [n.to_dict() for n in self.nodes]
         return out
 
@@ -274,13 +284,87 @@ def _check_params(issues: list[Issue], node: Node) -> None:
             _check_mapping(issues, nid, p, "measures")
     elif t == "sql":
         _check_sql_node(issues, node)
-    elif t == "union":
-        if not isinstance(p.get("distinct", False), bool):
-            issues.append(Issue(nid, "'distinct' must be true or false"))
+    elif t == "union" and not isinstance(p.get("distinct", False), bool):
+        issues.append(Issue(nid, "'distinct' must be true or false"))
+
+
+def _var_text(value: Any) -> str:
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    return str(value)
+
+
+def _variable_issues(pipeline: Pipeline) -> list[Issue]:
+    v = pipeline.variables
+    if not isinstance(v, dict):
+        return [Issue(None, "'variables' must map names to values")]
+    issues = []
+    for name, value in v.items():
+        if not isinstance(name, str) or not ID_PATTERN.match(name):
+            issues.append(Issue(None, f"variable name {name!r} must match {ID_PATTERN.pattern}"))
+        if not isinstance(value, (str, int, float, bool)):
+            issues.append(Issue(None, f"variable {name!r} needs a text, number or true/false value"))
+    return issues
+
+
+def variables_used(pipeline: Pipeline) -> dict[str, list[str]]:
+    """Each ``${name}`` in the nodes' params -> the node ids using it, in spec order."""
+    used: dict[str, list[str]] = {}
+
+    def walk(value: Any, nid: str) -> None:
+        if isinstance(value, str):
+            for name in VAR_PATTERN.findall(value):
+                if nid not in used.setdefault(name, []):
+                    used[name].append(nid)
+        elif isinstance(value, dict):
+            for v in value.values():
+                walk(v, nid)
+        elif isinstance(value, list):
+            for v in value:
+                walk(v, nid)
+
+    for n in pipeline.nodes:
+        walk(n.params, n.id)
+    return used
+
+
+def substitute_variables(value: Any, values: dict[str, str]) -> Any:
+    """``value`` (text, or lists and mappings of it) with every ``${name}`` replaced."""
+    if isinstance(value, str):
+        return VAR_PATTERN.sub(lambda m: values.get(m.group(1), m.group(0)), value)
+    if isinstance(value, dict):
+        return {k: substitute_variables(v, values) for k, v in value.items()}
+    if isinstance(value, list):
+        return [substitute_variables(v, values) for v in value]
+    return value
+
+
+def bind(pipeline: Pipeline, overrides: dict[str, Any] | None = None) -> Pipeline:
+    """The pipeline with every ``${name}`` replaced by its value; ``overrides`` win over defaults.
+
+    The result declares no variables, so binding it again changes nothing. Raises SpecError when
+    a variable is used but has no value.
+    """
+    if not pipeline.variables and not overrides and not variables_used(pipeline):
+        return pipeline
+    issues = _variable_issues(pipeline)
+    if issues:
+        raise SpecError(issues)
+    values = {k: _var_text(v) for k, v in {**pipeline.variables, **(overrides or {})}.items()}
+    missing = {name: nids for name, nids in variables_used(pipeline).items() if name not in values}
+    if missing:
+        raise SpecError([Issue(nids[0], f"uses ${{{name}}}, which has no value; declare it under 'variables'")
+                         for name, nids in missing.items()])
+    nodes = [Node(n.id, n.type, list(n.inputs), substitute_variables(n.params, values)) for n in pipeline.nodes]
+    return Pipeline(pipeline.name, nodes, pipeline.version, pipeline.description)
 
 
 def validate(pipeline: Pipeline) -> list[Issue]:
     """Return every problem in the spec. An empty list means the spec is valid."""
+    try:
+        pipeline = bind(pipeline)
+    except SpecError as e:
+        return list(e.issues)
     issues: list[Issue] = []
 
     if pipeline.version != SPEC_VERSION:

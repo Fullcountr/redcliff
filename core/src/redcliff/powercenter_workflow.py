@@ -233,9 +233,9 @@ def _flow(el: ET.Element, wname: str, ctx: dict, sessions: dict[str, Session], k
             detail += [f"{a.get('NAME')}: {a.get('VALUE')}" for a in found.findall("ATTRIBUTE")
                        if (a.get("NAME") or "").lower() in _DETAIL_ATTRS and a.get("VALUE")]
         tasks[key + name] = Task(shown, ttype, detail, shown)
-    links = [((l.get("FROMTASK") or "").upper(), (l.get("TOTASK") or "").upper()) for l in el.findall("WORKFLOWLINK")]
-    conditions = [f"{label}{l.get('FROMTASK')} → {label}{l.get('TOTASK')} if {l.get('CONDITION')}"
-                  for l in el.findall("WORKFLOWLINK") if (l.get("CONDITION") or "").strip()] + conditions
+    links = [((k.get("FROMTASK") or "").upper(), (k.get("TOTASK") or "").upper()) for k in el.findall("WORKFLOWLINK")]
+    conditions = [f"{label}{k.get('FROMTASK')} → {label}{k.get('TOTASK')} if {k.get('CONDITION')}"
+                  for k in el.findall("WORKFLOWLINK") if (k.get("CONDITION") or "").strip()] + conditions
     order: list[str] = []
     for n in _run_order(names, links):
         order += expanded.get(n, [key + n])
@@ -324,3 +324,35 @@ def substitute(text: str, params: dict[str, str]) -> tuple[str, list[str], list[
         return m.group(0)
 
     return _PARAM.sub(repl, text), used, missing
+
+
+def _in_quotes(text: str, at: int) -> bool:
+    """Is position ``at`` inside a single-quoted SQL string? ('' escapes count twice, so parity works.)"""
+    return text.count("'", 0, at) % 2 == 1
+
+
+def substitute_as_variables(text: str, params: dict[str, str], variable) -> tuple[str, dict[str, str], list[str], list[str]]:
+    """Like :func:`substitute`, but a parameter inside a quoted string becomes ``${variable}``.
+
+    PowerCenter expands parameters as text, and so does a pipeline variable, so a quoted use keeps
+    its meaning and can change per run. An unquoted use (a number, a column list) is expanded to
+    its value here, because the SQL has to parse. Returns (text, variables used -> value, names
+    expanded to their value, missing names).
+    """
+    used: dict[str, str] = {}
+    baked: list[str] = []
+    missing: list[str] = []
+
+    def repl(m: re.Match) -> str:
+        name = m.group(0).upper()
+        if name not in params:
+            missing.append(name)
+            return m.group(0)
+        if _in_quotes(text, m.start()):
+            var = variable(name)
+            used[var] = params[name]
+            return f"${{{var}}}"
+        baked.append(name)
+        return params[name]
+
+    return _PARAM.sub(repl, text), used, baked, missing

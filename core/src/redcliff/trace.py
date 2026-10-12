@@ -35,7 +35,7 @@ from redcliff.compile import (
     _source_relation,
     _transpile,
 )
-from redcliff.spec import Pipeline
+from redcliff.spec import Pipeline, bind
 
 PREFIX = "__rc_"
 ROWNUM = "__rc_row"
@@ -69,6 +69,7 @@ def _merged(prov: str) -> exp.Expression:
 
 def trace_query(pipeline: Pipeline, node_id: str, base_dir=None) -> TraceQuery:
     """DuckDB SQL for one step's rows, each with the source row numbers behind it."""
+    pipeline = bind(pipeline)
     node = pipeline.node(node_id)
     if node.type == "target":
         node_id = node.inputs[0]
@@ -96,7 +97,7 @@ def trace_query(pipeline: Pipeline, node_id: str, base_dir=None) -> TraceQuery:
             for i, alias in plain.items():
                 blocks.append(f"{_q(alias)} AS (\n  SELECT * EXCLUDE ({', '.join(carried[i])}) FROM {_q(i)}\n)")
             tree = sqlglot.parse_one(p["query"])
-            tree = tree.transform(lambda e: exp.Table(this=exp.to_identifier(plain[e.name]),
+            tree = tree.transform(lambda e, plain=plain: exp.Table(this=exp.to_identifier(plain[e.name]),
                                                       alias=exp.TableAlias(this=exp.to_identifier(e.alias or e.name)))
                                   if isinstance(e, exp.Table) and not e.db and e.name in plain else e)
             text = tree.sql("duckdb", pretty=True)
@@ -163,6 +164,7 @@ def trace_query(pipeline: Pipeline, node_id: str, base_dir=None) -> TraceQuery:
 
 def source_rows_query(pipeline: Pipeline, source_id: str, rows: list[int], base_dir=None) -> str:
     """DuckDB SQL for the given rows (1-based, in file order) of a source, numbered."""
+    pipeline = bind(pipeline)
     node = pipeline.node(source_id)
     if node.type != "source":
         raise CompileError(f"{source_id} is not a source")

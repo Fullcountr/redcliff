@@ -20,7 +20,7 @@ from sqlglot import exp
 from sqlglot.dialects.dialect import Dialect
 
 from redcliff.columns import Columns, infer_columns
-from redcliff.spec import Node, Pipeline
+from redcliff.spec import Node, Pipeline, bind
 
 DIALECTS = ("duckdb", "spark")
 JOIN_SQL = {"inner": "JOIN", "left": "LEFT JOIN", "right": "RIGHT JOIN", "full": "FULL OUTER JOIN"}
@@ -194,6 +194,15 @@ def _cte_chain(pipeline: Pipeline, needed: set[str], dialect: str, base_dir) -> 
     return blocks, views
 
 
+def variables_note(variables: dict, prefix: str) -> str:
+    """Comment lines naming the variable values baked into generated code."""
+    if not variables:
+        return ""
+    lines = [f"{prefix}Variables, with the values used here (change them with --var NAME=VALUE):"]
+    lines += [f"{prefix}  {k} = {v!r}" for k, v in variables.items()]
+    return "\n".join(lines) + "\n"
+
+
 def _with(blocks: list[str]) -> str:
     return "WITH\n" + ",\n\n".join(blocks) if blocks else ""
 
@@ -204,6 +213,7 @@ def _with(blocks: list[str]) -> str:
 def compile_query(pipeline: Pipeline, node_id: str, dialect: str = "duckdb", base_dir=None) -> str:
     """A SELECT returning one node's output: for previews, tests and ad hoc runs."""
     _check_dialect(dialect)
+    pipeline = bind(pipeline)
     node = pipeline.node(node_id)
     if node.type == "target":
         raise CompileError(f"{node_id} is a target; query its input {node.inputs[0]!r} instead")
@@ -273,6 +283,8 @@ def _hook_comments(target: Node) -> list[str]:
 def compile_script(pipeline: Pipeline, dialect: str = "duckdb", base_dir=None) -> str:
     """A runnable script that writes every target. One statement per target."""
     _check_dialect(dialect)
+    variables = dict(pipeline.variables)
+    pipeline = bind(pipeline)
     targets = [n for n in pipeline.topo_order() if n.type == "target"]
     if not targets:
         raise CompileError("the pipeline has no target to write")
@@ -285,7 +297,7 @@ def compile_script(pipeline: Pipeline, dialect: str = "duckdb", base_dir=None) -
         statements += pre
         statements.append(_write_statement(target, dialect, base_dir, blocks))
         statements += post
-    header = f"-- Redcliff pipeline: {pipeline.name} ({dialect})\n"
+    header = f"-- Redcliff pipeline: {pipeline.name} ({dialect})\n" + variables_note(variables, "-- ")
     if dialect == "duckdb":
         notes = [line for t in targets for line in _hook_comments(t)]
         if notes:
@@ -301,9 +313,12 @@ def compile_script(pipeline: Pipeline, dialect: str = "duckdb", base_dir=None) -
 
 def compile_pyspark(pipeline: Pipeline, base_dir=None) -> str:
     """A standalone PySpark script (DataFrame API) that reads sources and writes targets."""
+    variables = dict(pipeline.variables)
+    pipeline = bind(pipeline)
     cols = infer_columns(pipeline)
     lines = [
         f'"""Redcliff pipeline: {pipeline.name}. Generated code; edit the spec, not this file."""',
+        *([variables_note(variables, "# ").rstrip("\n")] if variables else []),
         "",
         "from pyspark.sql import SparkSession",
         "from pyspark.sql import functions as F",

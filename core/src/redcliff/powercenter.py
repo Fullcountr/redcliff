@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import re
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import sqlglot
@@ -47,9 +47,11 @@ from sqlglot.errors import ParseError
 from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
 
 from redcliff.importer import ImportResult, SQLImportError, _Builder
-from redcliff.informatica import CONVERTED, MANUAL, REVIEW, ExpressionError, _p, kind_of_type, translate
+from redcliff.informatica import (
+    CONVERTED, MANUAL, REVIEW, ExpressionError, _p, kind_of_type, param_variable, translate,
+)
 from redcliff.powercenter_workflow import (
-    Session, Workflow, flatten_mapplets, is_mapplet, parse_folder, parse_param_file, resolve_params, substitute,
+    Session, Workflow, flatten_mapplets, parse_folder, parse_param_file, resolve_params, substitute_as_variables,
 )
 from redcliff.scorecard import ScoreItem, Scorecard, lineage_coverage
 from redcliff.spec import ID_PATTERN, Pipeline, SpecError, validate
@@ -181,7 +183,7 @@ class _Manual(Exception):
 
 
 class _MappingConverter:
-    def __init__(self, imp: "_Importer", mapping: ET.Element, session: Session | None = None,
+    def __init__(self, imp: _Importer, mapping: ET.Element, session: Session | None = None,
                  file_params: dict[str, str] | None = None):
         self.imp = imp
         self.session = session
@@ -275,13 +277,14 @@ class _MappingConverter:
         return merged
 
     def subst(self, text: str) -> str:
-        """Expand $$PARAMS in SQL text, as PowerCenter does before running it."""
+        """Expand $$PARAMS in SQL text, as PowerCenter does: quoted uses become pipeline variables."""
         values = {k: v for k, (v, _kind) in self.params.items()}
-        out, used, missing = substitute(text, values)
-        for pname in dict.fromkeys(used):
+        out, variables, baked, missing = substitute_as_variables(text, values, param_variable)
+        self.use_variables(variables)
+        for pname in dict.fromkeys(baked):
             where = "the parameter file" if pname in self.from_file else "its default"
-            self.note(REVIEW, f"{pname} is fixed at {values[pname]!r} (from {where}); make it a pipeline "
-                              "variable if it changes between runs")
+            self.note(REVIEW, f"{pname} is fixed at {values[pname]!r} (from {where}): it isn't in quotes, so "
+                              "it can't be a variable here; make it one if it changes between runs")
         if missing:
             raise _Manual(f"its SQL uses {', '.join(dict.fromkeys(missing))}, which has no value; "
                           "pass the parameter file")
@@ -372,16 +375,30 @@ class _MappingConverter:
 
         return resolve
 
+    def use_variables(self, variables: dict[str, str]) -> None:
+        """Record pipeline variables a step uses, with their values for this session."""
+        for var, value in variables.items():
+            known = self.imp.variables.setdefault(var, value)
+            if known != value:
+                self.note(REVIEW, f"${{{var}}} is {value!r} for this session but {known!r} for an earlier one; "
+                                  f"the spec's default is {known!r}")
+            else:
+                pname = "$$" + var.upper()
+                where = "the parameter file" if pname in self.from_file else "the mapping's default"
+                self.note(CONVERTED, f"{pname} is the pipeline variable ${{{var}}}, default {value!r} from {where}")
+
     def expr(self, port: str, text: str, resolve) -> exp.Expression:
         try:
-            t = translate(text, resolve, self.params)
+            t = translate(text, resolve, self.params, as_variables=True)
         except ExpressionError as e:
             self.note(MANUAL, f"{port}: could not read {text!r} ({e}); a NULL placeholder stands in")
             return exp.null()
         for fn in t.functions:
             self.imp.functions[fn] = self.imp.functions.get(fn, 0) + 1
         for n in t.notes:
-            self.note(t.status, f"{port}: {n}")
+            if "is the pipeline variable" not in n:
+                self.note(t.status, f"{port}: {n}")
+        self.use_variables(t.variables)
         return t.sql
 
     def variables(self, ports: list[_Port], resolve) -> dict[str, tuple[exp.Expression, str | None]]:
@@ -399,7 +416,7 @@ class _MappingConverter:
                 return out.get(name) or resolve(name)
 
             try:
-                t = translate(p.expression or "NULL", scoped, self.params)
+                t = translate(p.expression or "NULL", scoped, self.params, as_variables=True)
             except ExpressionError as e:
                 self.note(MANUAL, f"{p.name}: {e}; a NULL placeholder stands in")
                 out[p.name] = (exp.null(), p.kind)
@@ -407,7 +424,9 @@ class _MappingConverter:
             for fn in t.functions:
                 self.imp.functions[fn] = self.imp.functions.get(fn, 0) + 1
             for n in t.notes:
-                self.note(t.status, f"{p.name}: {n}")
+                if "is the pipeline variable" not in n:
+                    self.note(t.status, f"{p.name}: {n}")
+            self.use_variables(t.variables)
             out[p.name] = (_p(t.sql), p.kind)
         return out
 
@@ -610,7 +629,7 @@ class _MappingConverter:
         imp = self.imp
         # Which source table each connected port reads, by the source instance it is wired from.
         sources: dict[str, str] = {}   # source instance -> table name
-        for port, (frm, _ff) in self.incoming[name].items():
+        for frm, _ff in self.incoming[name].values():
             if frm in self.instances:
                 sdef = self.definition(self.instances[frm])
                 if sdef is not None:
@@ -1135,9 +1154,9 @@ class _MappingConverter:
         for i in range(counts.pop()):
             cols: dict[str, str] = {}
             for out, src in single.items():
-                cols[names[out]] = colmap[src] if src in colmap else "NULL"
+                cols[names[out]] = colmap.get(src, "NULL")
             for out, srcs in occurs.items():
-                cols[names[out]] = colmap[srcs[i]] if srcs[i] in colmap else "NULL"
+                cols[names[out]] = colmap.get(srcs[i], "NULL")
             for gcid, out in index_of.items():
                 if out in occurs:
                     cols[names[gcid]] = str(i + 1)
@@ -1207,6 +1226,7 @@ class _Importer:
         self.prov: dict[str, dict[str, str]] = {}
         self.dialect_of: dict[str, str | None] = {}
         self.display: dict[str, str] = {}  # flattened mapplet instance -> MAPPLET/INSTANCE
+        self.variables: dict[str, str] = {}  # pipeline variables from $$PARAMS -> default value
         self.synced = 0
 
     def sync(self) -> None:
@@ -1370,7 +1390,8 @@ def import_powercenter(xml: str, mapping: str | list[str] | None = None, name: s
     title = name or (titled[0].label if len(titled) == 1 else
                      mappings[0][0].get("NAME") if len(mappings) == 1 else
                      (folders[0].get("NAME") if folders and folders[0] is not root else "powercenter"))
-    pipeline = Pipeline.from_dict({"version": 0, "name": _slug(title or "powercenter"), "nodes": imp.b.nodes})
+    pipeline = Pipeline.from_dict({"version": 0, "name": _slug(title or "powercenter"),
+                                   **({"variables": imp.variables} if imp.variables else {}), "nodes": imp.b.nodes})
     issues = validate(pipeline)
     if issues:  # a bug in the importer, not in the export
         raise SpecError(issues)
@@ -1396,7 +1417,7 @@ _TASK_ADVICE = {
 }
 
 
-def _workflow_items(imp: "_Importer", wf: Workflow, sessions: dict[str, Session]) -> None:
+def _workflow_items(imp: _Importer, wf: Workflow, sessions: dict[str, Session]) -> None:
     """A workflow is orchestration: its order is noted, and tasks that aren't sessions are graded."""
     steps = []
     for t in wf.order:

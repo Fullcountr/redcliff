@@ -89,7 +89,9 @@ def test_workflow_tasks_are_graded_and_ordered(workflow):
     sq = items["SQ_ORDERS"]
     assert sq.status == "review"
     assert any("ALTER SESSION SET NLS_DATE_FORMAT" in n and "doesn't run it" in n for n in sq.notes)
-    assert any("$$MIN_ORDER_DATE is fixed at '2026-09-02' (from the parameter file)" in n for n in sq.notes)
+    assert "$$MIN_ORDER_DATE is the pipeline variable ${min_order_date}, default '2026-09-02' from the parameter file" \
+        in sq.notes
+    assert workflow.pipeline.variables == {"min_order_date": "2026-09-02"}
     assert workflow.pipeline.name == "wf_customer_revenue"
 
 
@@ -99,14 +101,15 @@ def test_without_the_parameter_file_the_default_date_applies(con):
     # From 2026-01-01 every shipped order counts: SOUTH has 1, 4 and 8; NORTH has 2, 6 and 7.
     assert [(g[0], g[3], g[4]) for g in got] == [("NORTH", Decimal("239.99"), 3), ("SOUTH", Decimal("330.50"), 3)]
     sq = next(i for i in r.scorecard.items if i.name == "SQ_ORDERS")
-    assert any("'2026-01-01' (from its default)" in n for n in sq.notes)
+    assert any("default '2026-01-01' from the mapping's default" in n for n in sq.notes)
 
 
 def test_cli_takes_a_parameter_file(tmp_path, capsys):
     out = tmp_path / "p.yaml"
     assert main(["import", str(PC / "wf_customer_revenue.xml"), "--params", str(PC / "wf_customer_revenue.par"),
                  "-o", str(out)]) == 0
-    assert "STR_TO_DATE('2026-09-02'" in out.read_text()
+    text = out.read_text()
+    assert "STR_TO_DATE('${min_order_date}'" in text and "min_order_date: '2026-09-02'" in text
     assert "scorecard:" in capsys.readouterr().err
 
 

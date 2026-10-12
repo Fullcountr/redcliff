@@ -42,6 +42,19 @@ def _write_spec(data: dict, path: str | None) -> str:
     return text
 
 
+def _spec(args):
+    """Load the spec, with --var overrides applied to its variables."""
+    pipeline = load_spec(args.spec)
+    for item in getattr(args, "var", None) or []:
+        name, sep, value = item.partition("=")
+        if not sep or not name.strip():
+            raise SystemExit(f"--var expects NAME=VALUE, got {item!r}")
+        if name.strip() not in pipeline.variables:
+            _err(f"note: {name.strip()} isn't declared in the spec's variables; adding it")
+        pipeline.variables[name.strip()] = value
+    return pipeline
+
+
 def _ref(text: str) -> Ref:
     node, _, column = text.partition(".")
     if not node or not column:
@@ -110,7 +123,7 @@ def _write_project(files: dict[str, str], out_dir: str | None) -> None:
 
 
 def cmd_compile(args) -> int:
-    pipeline = load_spec(args.spec)
+    pipeline = _spec(args)
     base = Path(args.spec).parent if args.resolve_paths else None
     if args.to == "dbt":
         from redcliff.dbt import compile_dbt
@@ -137,7 +150,7 @@ def cmd_compile(args) -> int:
 
 
 def cmd_lineage(args) -> int:
-    graph = build_graph(load_spec(args.spec))
+    graph = build_graph(_spec(args))
     for i in graph.issues:
         _err(f"column issue: {i}")
     if args.openlineage:
@@ -170,7 +183,7 @@ def cmd_run(args) -> int:
     except ImportError:
         _err("run needs DuckDB: pip install duckdb")
         return 2
-    pipeline = load_spec(args.spec)
+    pipeline = _spec(args)
     base = Path(args.spec).parent
     con = duckdb.connect(args.db) if args.db else duckdb.connect()
     if args.node:
@@ -199,7 +212,7 @@ def cmd_trace(args) -> int:
         return 2
     from redcliff.trace import trace_query, trace_rows
 
-    pipeline = load_spec(args.spec)
+    pipeline = _spec(args)
     base = Path(args.spec).parent
     con = duckdb.connect(args.db, read_only=True) if args.db else duckdb.connect()
     tq = trace_query(pipeline, args.node, base)
@@ -271,7 +284,6 @@ def _diff_one(base, head, args, base_dir, head_dir):
 
 
 def cmd_diff(args) -> int:
-    from redcliff.spec import Pipeline
 
     results = []  # (label, diff)
     if args.git:
@@ -362,6 +374,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("compile", help="generate DuckDB SQL, Spark SQL, PySpark, a dbt project or a Lakeflow pipeline")
     p.add_argument("spec")
+    p.add_argument("--var", action="append", metavar="NAME=VALUE", help="set a pipeline variable (repeatable)")
     p.add_argument("--to", choices=["duckdb", "spark", "pyspark", "dbt", "lakeflow"], default="duckdb")
     p.add_argument("--adapter", default="duckdb", help="dbt: the adapter to write SQL for (duckdb, databricks, "
                    "spark, snowflake, bigquery, postgres, redshift)")
@@ -373,6 +386,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("lineage", help="column lineage, blast radius or OpenLineage export")
     p.add_argument("spec")
+    p.add_argument("--var", action="append", metavar="NAME=VALUE", help="set a pipeline variable (repeatable)")
     g = p.add_mutually_exclusive_group()
     g.add_argument("--column", help="NODE.COLUMN: where does it come from?")
     g.add_argument("--impact", help="NODE.COLUMN: what does a change to it touch?")
@@ -381,6 +395,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("run", help="run the pipeline locally with DuckDB")
     p.add_argument("spec")
+    p.add_argument("--var", action="append", metavar="NAME=VALUE", help="set a pipeline variable (repeatable)")
     p.add_argument("--db", help="DuckDB database file holding table sources and targets")
     p.add_argument("--node", help="preview one node's rows instead of writing targets")
     p.add_argument("--limit", type=int, default=20)
@@ -388,6 +403,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("trace", help="row-level trace: the source rows behind a step's rows")
     p.add_argument("spec")
+    p.add_argument("--var", action="append", metavar="NAME=VALUE", help="set a pipeline variable (repeatable)")
     p.add_argument("node", help="the step (or target) whose rows to trace")
     p.add_argument("--where", help="SQL condition picking the rows, e.g. \"region = 'South'\"")
     p.add_argument("--db", help="DuckDB database file holding table sources")

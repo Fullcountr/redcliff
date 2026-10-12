@@ -12,6 +12,7 @@ goes stale if the file changes in between.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import difflib
 import hashlib
@@ -19,7 +20,8 @@ import json
 import sys
 import uuid
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from redcliff.compile import compile_pyspark, compile_query, compile_script
 from redcliff.diff import data_diff, diff_pipelines
@@ -346,10 +348,8 @@ class Server:
             base = Pipeline.from_dict(self.load(spec)[1]) if exists else Pipeline(name=head.name, nodes=[])
             diff = diff_pipelines(base, head)
             if data and not diff.issues:
-                try:
+                with contextlib.suppress(ToolError):  # DuckDB isn't installed: no data section
                     diff.data = data_diff(base, head, self.duck(), p.parent, p.parent)
-                except ToolError:
-                    pass  # DuckDB isn't installed: no data section
             after_text = edit_spec_text(before_text, after) if exists else \
                 dump_spec(after, "json" if p.suffix == ".json" else "yaml")
             text_diff = "".join(difflib.unified_diff(before_text.splitlines(True), after_text.splitlines(True),

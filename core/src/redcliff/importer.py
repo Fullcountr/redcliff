@@ -229,7 +229,7 @@ class _Builder:
         current = rels[0][1]
         holder = {rels[0][0]: current}
         for j, (alias, rid) in zip(joins, rels[1:]):
-            def in_join(a: str | None, c: str) -> tuple[str | None, str]:
+            def in_join(a: str | None, c: str, rid=rid, alias=alias) -> tuple[str | None, str]:
                 if a is None:
                     return None, c
                 node = rid if a == alias else holder.get(a)

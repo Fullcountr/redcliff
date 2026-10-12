@@ -20,6 +20,20 @@
     "description": {
       "type": "string"
     },
+    "variables": {
+      "type": "object",
+      "description": "Variables with default values. ${name} in any node's params is replaced by the value before the spec is checked or compiled; runs can override it (--var NAME=VALUE).",
+      "propertyNames": {
+        "pattern": "^[a-z_][a-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean"
+        ]
+      }
+    },
     "nodes": {
       "type": "array",
       "minItems": 1,

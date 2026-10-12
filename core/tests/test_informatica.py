@@ -51,6 +51,8 @@ def run(text, params=None):
     ("SUBSTR(STATUS, -3)", "ped"),
     ("INSTR(STATUS, 'pp')", 4),
     ("IN(STATUS, 'shipped', 'pending')", True),
+    ("IN(STATUS, 'SHIPPED', 'Pending', 0)", True),           # 0: case-insensitive
+    ("IN(STATUS, 'SHIPPED', 1)", False),                     # 1: case-sensitive
     ("NOT ISNULL(REGION) OR AMOUNT > 100 AND STATUS = 'x'", False),
     ("REPLACECHR(1, FIRST_NAME, ' n', '')", "Aa"),
     ("REPLACESTR(1, STATUS, 'ship', 'SHIP')", "SHIPped"),
@@ -84,7 +86,6 @@ def test_aggregates_with_filter_conditions():
     ("FOO(1)", "manual", "FOO() has no translation"),
     ("IIF(AMOUNT < 0, ERROR('negative'), AMOUNT)", "review", "ERROR() rejects the row"),
     ("DATE_DIFF(ORDER_DATE, ORDER_DATE, 'MM')", "review", "fractional"),
-    ("IN(STATUS, 'A', 'B', 0)", "review", "case-insensitively"),
     ("IS_DATE(S, 'YYYY-MM-DD')", "manual", "IS_DATE() has no portable SQL equivalent"),
 ])
 def test_honest_statuses(text, status, note):

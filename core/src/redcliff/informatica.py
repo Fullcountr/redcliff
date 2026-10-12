@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Callable
+from collections.abc import Callable
 
 from sqlglot import exp
 from sqlglot.dialects.oracle import Oracle
@@ -57,6 +57,7 @@ class Translation:
     notes: list[str] = field(default_factory=list)
     functions: set[str] = field(default_factory=set)
     references: set[str] = field(default_factory=set)  # port names used, upper case
+    variables: dict[str, str] = field(default_factory=dict)  # pipeline variables used -> default value
 
     def text(self) -> str:
         return self.sql.sql()
@@ -124,8 +125,11 @@ _AGGREGATES = {"SUM", "AVG", "COUNT", "MAX", "MIN", "MEDIAN", "STDDEV", "VARIANC
 
 
 class _Parser:
-    def __init__(self, text: str, resolve: Resolver, params: dict[str, tuple[str, str | None]]):
+    def __init__(self, text: str, resolve: Resolver, params: dict[str, tuple[str, str | None]],
+                 as_variables: bool = False):
         self.toks = _tokens(text)
+        self.as_variables = as_variables
+        self.variables: dict[str, str] = {}
         self.i = 0
         self.resolve = resolve
         self.params = params
@@ -330,19 +334,26 @@ class _Parser:
         name = text.upper()
         if name in self.params:
             value, kind = self.params[name]
-            self.note(REVIEW, f"mapping parameter {name} is fixed at {value!r}; "
-                              "make it a pipeline variable if it changes between runs")
+            if self.as_variables:
+                var = param_variable(name)
+                self.variables[var] = value
+                self.note(CONVERTED, f"{name} is the pipeline variable ${{{var}}} (default {value!r})")
+                text = f"${{{var}}}"
+            else:
+                self.note(REVIEW, f"mapping parameter {name} is fixed at {value!r}; "
+                                  "make it a pipeline variable if it changes between runs")
+                text = value
             if kind == "number":
                 try:
                     float(value)
-                    return exp.Literal.number(value)
+                    return exp.Var(this=text) if self.as_variables else exp.Literal.number(value)
                 except ValueError:
                     pass
             if kind == "date":
-                return self.tagged(exp.StrToTime(this=exp.Literal.string(value),
+                return self.tagged(exp.StrToTime(this=exp.Literal.string(text),
                                                  format=exp.Literal.string(_strftime(_DEFAULT_DATE_FORMAT))),
                                    "date")
-            return exp.Literal.string(value)
+            return exp.Literal.string(text)
         self.note(MANUAL, f"{name} has no value Redcliff can use; a NULL placeholder stands in")
         return exp.null()
 
@@ -414,14 +425,14 @@ class _Parser:
     def fn_in(self, a):
         self.arity("IN", a, 2, None)
         values = a[1:]
-        if len(values) > 1 and isinstance(values[-1], exp.Literal) and not values[-1].is_string \
-                and values[-1].this in ("0", "1") and len(values) >= 2:
-            # A trailing 0/1 is PowerCenter's case-sensitivity flag only when the other values are strings.
-            if all(isinstance(v, exp.Literal) and v.is_string for v in values[:-1]):
-                if values[-1].this == "0":
-                    self.note(REVIEW, "IN(..., 0) compares case-insensitively in PowerCenter; "
-                                      "this compares exactly")
-                values = values[:-1]
+        flag = values[-1] if len(values) > 1 else None
+        # A trailing 0/1 is PowerCenter's case-sensitivity flag only when the other values are strings.
+        if isinstance(flag, exp.Literal) and not flag.is_string and flag.this in ("0", "1") \
+                and all(isinstance(v, exp.Literal) and v.is_string for v in values[:-1]):
+            values = values[:-1]
+            if flag.this == "0":  # case-insensitive: compare lower case on both sides
+                return exp.In(this=exp.Lower(this=_p(a[0])),
+                              expressions=[exp.Literal.string(v.this.lower()) for v in values])
         return exp.In(this=_p(a[0]), expressions=values)
 
     def fn_is_spaces(self, a):
@@ -657,14 +668,22 @@ def translate(
     text: str,
     resolve: Resolver,
     params: dict[str, tuple[str, str | None]] | None = None,
+    as_variables: bool = False,
 ) -> Translation:
     """Translate one PowerCenter expression. Raises ExpressionError if it can't be read.
 
     ``resolve`` maps a port name to (SQL expression, kind); ``params`` maps mapping parameters
-    such as ``$$RUN_DATE`` to (default value, kind).
+    such as ``$$RUN_DATE`` to (default value, kind). With ``as_variables`` a parameter becomes a
+    pipeline variable reference (``${run_date}``) instead of its value.
     """
-    parser = _Parser(text, resolve, {k.upper(): v for k, v in (params or {}).items()})
+    parser = _Parser(text, resolve, {k.upper(): v for k, v in (params or {}).items()}, as_variables)
     sql = parser.parse()
     while isinstance(sql, exp.Paren):
         sql = sql.this
-    return Translation(sql, parser.status, [n for n in parser.notes if n], parser.functions, parser.references)
+    return Translation(sql, parser.status, [n for n in parser.notes if n], parser.functions, parser.references,
+                       parser.variables)
+
+
+def param_variable(name: str) -> str:
+    """The pipeline variable for a mapping parameter: $$MIN_ORDER_DATE -> min_order_date."""
+    return re.sub(r"[^a-z0-9_]", "_", name.lstrip("$").lower()) or "param"

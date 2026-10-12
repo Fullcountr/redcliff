@@ -128,3 +128,16 @@ def test_issues_can_fail_the_check(tmp_path, capsys, fail):
     code = main(["diff", str(tmp_path / "a.yaml"), str(tmp_path / "b.yaml")] + (["--fail-on-issues"] if fail else []))
     assert code == (1 if fail else 0)
     assert "Issues in the new spec" in capsys.readouterr().out
+
+
+def test_variable_changes_are_listed():
+    a, b = spec(), spec()
+    a["variables"] = {"status": "shipped"}
+    b["variables"] = {"status": "pending"}
+    for d in (a, b):
+        node(d, "shipped")["params"]["condition"] = "status = '${status}'"
+    diff = diff_pipelines(Pipeline.from_dict(a), Pipeline.from_dict(b))
+    assert diff.variables == ["status: `shipped` → `pending`"] and not diff.steps
+    assert "1 variable changed" in diff.summary()
+    diff.data = data_diff(Pipeline.from_dict(a), Pipeline.from_dict(b), duckdb.connect(), SPECS, SPECS)
+    assert (diff.data[0].rows_before, diff.data[0].rows_after) == (2, 1)  # only East has a pending order
