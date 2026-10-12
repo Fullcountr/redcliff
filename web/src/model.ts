@@ -38,6 +38,7 @@ export type Spec = {
   version: 0;
   name: string;
   description?: string;
+  variables?: Record<string, string | number | boolean>;
   nodes: Step[];
 };
 

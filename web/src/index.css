@@ -900,3 +900,20 @@ td.rowno { color: var(--text-3); }
 .check-dot.passed { background: var(--ok); }
 .check-dot.warned { background: var(--warn); }
 .check-dot.failed { background: var(--bad); }
+
+/* Pipeline variables, editable over the canvas */
+.vars {
+  position: absolute; top: calc(var(--gap) + var(--bar-h) + 10px); left: var(--gap); z-index: 5;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; max-width: min(640px, calc(100vw - 2 * var(--gap)));
+  padding: 5px 8px; border-radius: 12px; font-size: 12px; color: var(--text-2);
+  animation: rise 0.3s var(--ease);
+}
+.vars.below-hint { top: calc(var(--gap) + var(--bar-h) + 50px); }
+.vars-label { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--text); padding-left: 2px; }
+.vars-label svg { width: 13px; height: 13px; color: var(--oxide); }
+.var { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11.5px; }
+.var input {
+  font-family: var(--font-mono); font-size: 11.5px; height: 24px; padding: 0 7px; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--text);
+}
+.var input:focus { outline: none; border-color: var(--oxide-line); box-shadow: var(--ring); }

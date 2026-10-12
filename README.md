@@ -486,13 +486,12 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 - [x] Row-level trace: click an output row, see the input rows behind it
 - [x] MCP server, so AI agents can edit pipelines and show a diff before you accept
 - [x] Pull request bot: lineage and data diffs posted on every PR ([`uses: Fullcountr/redcliff@main`](docs/pr-bot.md))
-- [x] Pipeline variables: `${name}` with defaults and `--var` overrides; PowerCenter `$$PARAMS` import as variables, dbt gets `var()`
+- [x] Pipeline variables: `${name}` with defaults, `--var` overrides and a Variables bar in the playground; PowerCenter `$$PARAMS` import as variables, dbt gets `var()`
 - [x] Merge targets (`mode: merge` with `keys` and `delete_when`); PowerCenter Update Strategy upserts import as merges
 - [x] Data quality expectations on any step: `redcliff test`, results on the canvas, dbt tests and Lakeflow expectations
 
 ### Next
 
-- [ ] A variables panel in the playground, to change a run's values and see the rows change
 - [ ] SSIS package (`.dtsx`) importer
 - [ ] `pip install redcliff` from PyPI, with a release workflow
 - [ ] VS Code extension: the canvas and lineage next to the spec file

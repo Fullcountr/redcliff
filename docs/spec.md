@@ -129,6 +129,7 @@ template is, before the spec is checked, analyzed or compiled. Quote it where SQ
 | Where | What happens |
 | --- | --- |
 | `redcliff compile / run / trace / lineage --var status=pending` | overrides the default for that run |
+| playground | a Variables bar over the canvas; a new value re-runs the row counts, previews and checks |
 | Spark SQL, PySpark, DuckDB SQL, Lakeflow | the values are written into the code, listed in a header comment |
 | dbt | variables stay variables: `{{ var("status") }}`, with the defaults under `vars:` in `dbt_project.yml` |
 | PowerCenter import | a `$$PARAM` in an expression, or inside quotes in SQL, becomes a variable with the parameter file's value as its default |

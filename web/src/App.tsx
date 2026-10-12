@@ -12,6 +12,7 @@ import { engine, engineReady, startEngine } from "./engine/engine";
 import { ImportDialog, type ImportMode, type ImportSamples } from "./components/ImportDialog";
 import { Inspector, type Tab } from "./components/Inspector";
 import { StepNode, type StepNodeType } from "./components/StepNode";
+import { Variables } from "./components/Variables";
 import { layout } from "./layout";
 import { fromImpact, trace, type Highlight } from "./lineage";
 import {
@@ -540,6 +541,11 @@ export default function App() {
           </Menu>
         </nav>
       </header>
+
+      {spec && spec.variables && Object.keys(spec.variables).length > 0 && !importing.mode && (
+        <Variables values={spec.variables} belowHint={!selectedId && !highlight}
+          onChange={(variables) => replaceSpec({ ...spec, variables })} />
+      )}
 
       {spec && !selectedId && !highlight && !importing.mode && (
         <div className="hint glass">

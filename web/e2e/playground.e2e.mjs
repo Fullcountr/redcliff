@@ -243,6 +243,19 @@ await step("a PowerCenter workflow imports with its mapplet, session and paramet
   await shot(page, "13-workflow");
 });
 
+await step("changing a variable re-runs the pipeline", async () => {
+  const box = page.getByLabel("Variable min_order_date");
+  assert.equal(await box.inputValue(), "2026-09-02");
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="sq_orders"] .step-rows')?.textContent === "6 rows", null, { timeout: 30000 });
+  await box.fill("2026-01-01");
+  await box.press("Enter");
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="sq_orders"] .step-rows')?.textContent === "8 rows", null, { timeout: 30000 });
+  await shot(page, "13-variables");
+  await box.fill("2026-09-02");
+  await box.press("Enter");
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="sq_orders"] .step-rows')?.textContent === "6 rows", null, { timeout: 30000 });
+});
+
 await step("a share link restores the pipeline", async () => {
   await page.getByRole("button", { name: "Share link" }).click();
   await page.waitForFunction(() => location.hash.startsWith("#p="));
