@@ -373,6 +373,67 @@ def dump_spec(spec: Pipeline | dict[str, Any], fmt: str = "yaml") -> str:
     return json.dumps(data, indent=2) + "\n"
 
 
+def edit_spec_text(text: str, after: dict[str, Any]) -> str:
+    """``text`` changed to say ``after``, keeping the layout of everything that didn't change.
+
+    Unchanged steps keep their exact text (comments, flow style, blank lines); changed and new
+    steps are written in the same indentation. Falls back to a full rewrite when the file's
+    layout isn't one step per block.
+    """
+    fmt = "json" if text.lstrip().startswith("{") else "yaml"
+    if fmt == "json" or not text.strip():
+        return dump_spec(after, fmt)
+    import re
+
+    import yaml
+
+    lines = text.splitlines(keepends=True)
+    try:
+        start = next(i for i, line in enumerate(lines) if re.match(r"nodes:\s*(#.*)?$", line))
+        before = yaml.safe_load(text)
+        first = next(i for i in range(start + 1, len(lines)) if lines[i].strip() and not lines[i].lstrip().startswith("#"))
+        indent = re.match(r"(\s*)- ", lines[first]).group(1)
+    except (StopIteration, AttributeError, yaml.YAMLError):
+        return dump_spec(after)
+    blocks: list[list[str]] = []
+    for line in lines[first:]:
+        if line.startswith(f"{indent}- "):
+            blocks.append([line])
+        elif line.strip() == "" or line.startswith(indent + "  ") or line.lstrip().startswith("#"):
+            if not blocks:
+                return dump_spec(after)
+            blocks[-1].append(line)
+        else:
+            return dump_spec(after)  # something after the nodes: rewrite
+    old_nodes = before.get("nodes") or []
+    if len(blocks) != len(old_nodes):
+        return dump_spec(after)
+    for block, node in zip(blocks, old_nodes):
+        if yaml.safe_load("".join(block)) != [node]:
+            return dump_spec(after)
+    text_of = {n.get("id"): "".join(b) for n, b in zip(old_nodes, blocks)}
+    old_of = {n.get("id"): n for n in old_nodes}
+    spaced = len(blocks) > 1 and blocks[0][-1].strip() == ""
+
+    header = {k: v for k, v in after.items() if k != "nodes"}
+    old_header = {k: v for k, v in before.items() if k != "nodes"}
+    head = "".join(lines[:start + 1]) if header == old_header else \
+        dump_spec({**header, "nodes": []}).replace("nodes: []", "nodes:")
+    out = [head + "".join(lines[start + 1:first])]
+    nodes = after.get("nodes") or []
+    for i, node in enumerate(nodes):
+        if old_of.get(node.get("id")) == node:
+            block = text_of[node["id"]]
+        else:
+            body = dump_spec(node).splitlines()
+            block = "".join([f"{indent}- {body[0]}\n"] + [f"{indent}  {line}\n" for line in body[1:]])
+        block = block.rstrip("\n") + "\n"
+        if spaced and i < len(nodes) - 1:
+            block += "\n"
+        out.append(block)
+    return "".join(out)
+
+
 def load_spec(path: str | Path) -> Pipeline:
     """Read, parse and validate a spec file (.yaml, .yml or .json)."""
     return parse_spec(Path(path).read_text(encoding="utf-8"))
