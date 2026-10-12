@@ -67,17 +67,19 @@ npm run dev        # needs Node 20+ and Python 3 with pip (used once, to vendor 
 
 Then open the printed URL.
 
-**On the command line:**
+**On the command line** ([on PyPI](https://pypi.org/project/redcliff/)):
 
 ```bash
-cd redcliff/core
-pip install -e ".[cli]"
-redcliff import ../examples/legacy/teradata_revenue.sql --dialect teradata \
-  --schema ../examples/legacy/schema.json -o pipeline.yaml
+pip install "redcliff[cli]"
+cd redcliff   # the clone above, for the examples
+redcliff import examples/legacy/teradata_revenue.sql --dialect teradata \
+  --schema examples/legacy/schema.json -o pipeline.yaml
 redcliff lineage pipeline.yaml --impact orders.status
-redcliff import ../examples/legacy/powercenter/m_customer_revenue.xml \
+redcliff import examples/legacy/powercenter/m_customer_revenue.xml \
   -o mapping.yaml --scorecard scorecard.md
 ```
+
+To work on Redcliff itself, install from the clone instead: `pip install -e "core[dev]"`.
 
 ---
 
@@ -502,10 +504,10 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 - [x] Merge targets (`mode: merge` with `keys` and `delete_when`); PowerCenter Update Strategy upserts import as merges
 - [x] Data quality expectations on any step: `redcliff test`, results on the canvas, dbt tests and Lakeflow expectations
 - [x] SSIS package (`.dtsx`) importer, with a scorecard
+- [x] `pip install redcliff` from PyPI, released by a tag-triggered workflow
 
 ### Next
 
-- [ ] `pip install redcliff` from PyPI: the release workflow is ready; it needs PyPI trusted publishing set up ([docs/releasing.md](docs/releasing.md))
 - [ ] VS Code extension: the canvas and lineage next to the spec file
 - [ ] OpenLineage run events from `redcliff run`, so a catalog such as Marquez sees each run with its column lineage
 - [ ] Talend and IBM DataStage importers

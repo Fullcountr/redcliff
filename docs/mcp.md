@@ -5,7 +5,7 @@ connected to it can read your pipelines, explain them, trace columns and rows, g
 propose changes. A change is never written until you've seen what it does and said yes.
 
 ```text
-pip install "./core[cli]"          # from a checkout of this repository
+pip install "redcliff[cli]"
 redcliff mcp --root path/to/repo   # speaks MCP over stdio
 ```
 

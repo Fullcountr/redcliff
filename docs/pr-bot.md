@@ -76,6 +76,9 @@ jobs:
 Every pull request that touches a spec gets one comment, updated in place on each push, and the
 same report in the job summary.
 
+`@main` follows the latest code; pin a release, such as `Fullcountr/redcliff@v0.1.0`, to keep the
+report stable.
+
 | Input | Default | Does |
 | --- | --- | --- |
 | `base` | the pull request's base branch | the git ref to compare with |
