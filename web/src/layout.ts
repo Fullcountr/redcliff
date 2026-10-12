@@ -1,9 +1,9 @@
 import dagre from "@dagrejs/dagre";
 import type { Spec } from "./model";
 
-export const NODE_WIDTH = 204;
+export const NODE_WIDTH = 212;
 export const MAX_COLUMNS = 8;
-const HEADER = 84;
+const HEADER = 96;
 const ROW = 23;
 
 export function nodeHeight(columnCount: number): number {
@@ -15,7 +15,7 @@ export function nodeHeight(columnCount: number): number {
 /** Left-to-right layout: sources on the left, targets on the right. */
 export function layout(spec: Spec, columns: Record<string, string[]>): Record<string, { x: number; y: number }> {
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: "LR", nodesep: 22, ranksep: 46, marginx: 24, marginy: 24 });
+  g.setGraph({ rankdir: "LR", nodesep: 24, ranksep: 52, marginx: 24, marginy: 24 });
   g.setDefaultEdgeLabel(() => ({}));
   for (const n of spec.nodes) {
     g.setNode(n.id, { width: NODE_WIDTH, height: nodeHeight(columns[n.id]?.length ?? 0) });

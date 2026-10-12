@@ -1,23 +1,47 @@
 import {
-  Background, Controls, ReactFlow, type Connection, type Edge, type EdgeChange, type NodeChange,
+  Background, BackgroundVariant, ReactFlow, type Connection, type Edge, type EdgeChange, type NodeChange,
   applyNodeChanges, useReactFlow,
 } from "@xyflow/react";
+import {
+  BookOpen, Check, ChevronDown, CircleCheck, FileCode2, FileSpreadsheet, LoaderCircle, Lock, Maximize, Minus,
+  Monitor, Moon, MousePointerClick, Plus, Share2, Sparkles, Sun, Upload, WandSparkles, Waypoints, Workflow,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addCsv, count, loadSamples, startDuck, tables } from "./engine/duck";
 import { engine, engineReady, startEngine } from "./engine/engine";
-import { ImportDialog } from "./components/ImportDialog";
+import { ImportDialog, type ImportMode } from "./components/ImportDialog";
 import { Inspector, type Tab } from "./components/Inspector";
 import { StepNode, type StepNodeType } from "./components/StepNode";
 import { layout } from "./layout";
 import { fromImpact, trace, type Highlight } from "./lineage";
-import { defaultParams, refParts, type Analysis, type Impact, type Spec, type Step, type StepType } from "./model";
+import {
+  defaultParams, refParts, type Analysis, type Impact, type ImportResult, type Scorecard, type ScoreStatus,
+  type Spec, type Step, type StepType,
+} from "./model";
 import { shareLink, specFromHash } from "./share";
+import { BrandMark, Menu, MenuItem, useTheme, type Theme } from "./ui";
 
-type Samples = { tables: string[]; specs: Record<string, Spec>; legacy: string };
+type Samples = { tables: string[]; specs: Record<string, Spec>; legacy: string; powercenter: string };
 type EngineState = { state: "loading" | "ready" | "failed"; ms?: number; error?: string };
 
 const nodeTypes = { step: StepNode };
 const BASE = import.meta.env.BASE_URL;
+const RANK: Record<ScoreStatus, number> = { converted: 0, review: 1, manual: 2 };
+
+const EXAMPLES: Record<string, string> = {
+  orders_revenue: "Join, filter and aggregate two CSVs",
+  customer_cleanup: "Tidy names and emails, derive columns",
+  daily_events: "Union two event streams by day",
+};
+
+/** Fit the pipeline into the part of the canvas the floating bar and inspector leave free. */
+function fitPadding() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  if (w <= 900) return { top: "72px", right: "24px", bottom: `${Math.round(h * 0.46) + 40}px`, left: "24px" } as const;
+  const inspector = w <= 1100 ? 350 : 400;
+  return { top: "112px", right: `${inspector + 48}px`, bottom: "72px", left: "72px" } as const;
+}
 
 function uniqueId(spec: Spec, base: string): string {
   const taken = new Set(spec.nodes.map((n) => n.id));
@@ -40,12 +64,15 @@ export default function App() {
   const [counts, setCounts] = useState<Record<string, number | null>>({});
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
   const [notes, setNotes] = useState<string[]>([]);
+  const [scorecard, setScorecard] = useState<Scorecard | null>(null);
+  const [activeItem, setActiveItem] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("step");
-  const [importing, setImporting] = useState<{ open: boolean; busy: boolean; error: string | null }>({
-    open: false, busy: false, error: null,
+  const [importing, setImporting] = useState<{ mode: ImportMode | null; busy: boolean; error: string | null }>({
+    mode: null, busy: false, error: null,
   });
   const [toast, setToast] = useState<string | null>(null);
   const [example, setExample] = useState("orders_revenue");
+  const [theme, setTheme, dark] = useTheme();
   const fileInput = useRef<HTMLInputElement>(null);
   const flow = useReactFlow();
   const ready = eng.state === "ready";
@@ -53,7 +80,7 @@ export default function App() {
 
   const say = useCallback((message: string) => {
     setToast(message);
-    window.setTimeout(() => setToast((t) => (t === message ? null : t)), 2800);
+    window.setTimeout(() => setToast((t) => (t === message ? null : t)), 3200);
   }, []);
 
   // ---------------------------------------------------------------- boot
@@ -113,9 +140,10 @@ export default function App() {
 
   // Refit when the automatic layout changes (new pipeline, new steps, columns arriving).
   const layoutKey = Object.keys(positions).length ? "manual" : JSON.stringify(autoPositions);
+  const fit = useCallback(() => flow.fitView({ padding: fitPadding(), maxZoom: 1.05, duration: 250 }), [flow]);
   useEffect(() => {
     if (layoutKey === "manual") return;
-    const id = window.requestAnimationFrame(() => flow.fitView({ padding: 0.12, maxZoom: 1.1 }));
+    const id = window.requestAnimationFrame(() => flow.fitView({ padding: fitPadding(), maxZoom: 1.05 }));
     return () => window.cancelAnimationFrame(id);
   }, [layoutKey, flow]);
 
@@ -141,13 +169,28 @@ export default function App() {
     return null;
   }, [analysis, hovered, pinned, impact, spec]);
 
-  const clearFocus = useCallback(() => { setPinned(null); setHovered(null); }, []);
+  const clearFocus = useCallback(() => { setPinned(null); setHovered(null); setActiveItem(null); }, []);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") clearFocus(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !document.querySelector("dialog[open]")) clearFocus();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [clearFocus]);
+
+  // ---------------------------------------------------------------- scorecard on the canvas
+  const scoreByNode = useMemo(() => {
+    const out: Record<string, ScoreStatus> = {};
+    for (const item of scorecard?.items ?? []) {
+      for (const n of item.nodes) if (!out[n] || RANK[item.status] > RANK[out[n]]) out[n] = item.status;
+    }
+    return out;
+  }, [scorecard]);
+  const activeNodes = useMemo(() => {
+    const item = scorecard?.items.find((i) => i.name === activeItem);
+    return item ? { nodes: new Set(item.nodes), status: item.status } : null;
+  }, [scorecard, activeItem]);
 
   // ---------------------------------------------------------------- spec edits
   const replaceSpec = useCallback((next: Spec, keepPositions = true) => {
@@ -221,11 +264,13 @@ export default function App() {
         issues: issuesByNode[step.id] ?? [],
         highlight,
         selected: step.id === selectedId,
+        score: scoreByNode[step.id] ?? null,
+        scored: activeNodes?.nodes.has(step.id) ? activeNodes.status : null,
         onHoverColumn: setHovered,
         onPinColumn: (ref: string) => setPinned((p) => (p === ref ? null : ref)),
       },
     }));
-  }, [spec, analysis, counts, positions, autoPositions, selectedId, highlight]);
+  }, [spec, analysis, counts, positions, autoPositions, selectedId, highlight, scoreByNode, activeNodes]);
 
   // React Flow hides a node until it is measured, so keep each node's measurements across
   // re-renders (hovering a column re-renders every card) instead of handing it fresh objects.
@@ -268,33 +313,45 @@ export default function App() {
   }, [deleteStep]);
 
   // ---------------------------------------------------------------- actions
-  const doImport = async (sql: string, dialect: string) => {
-    setImporting({ open: true, busy: true, error: null });
-    const schema = Object.fromEntries(tables.entries());
-    const r = await engine.importSql(sql, dialect, schema, "imported");
-    if (!r.ok) {
-      setImporting({ open: true, busy: false, error: r.error });
-      return;
-    }
+  const loaded = (r: ImportResult, label: string) => {
     replaceSpec(r.spec, false);
     setNotes(r.warnings);
+    setScorecard(r.scorecard);
+    setActiveItem(null);
     setSelectedId(null);
     setExample("");
-    setTab("step");
-    setImporting({ open: false, busy: false, error: null });
-    say(`Imported ${r.spec.nodes.length} steps`);
+    setImporting({ mode: null, busy: false, error: null });
+    const c = r.scorecard.counts;
+    if (r.scorecard.origin === "powercenter") {
+      setTab("migration");
+      say(`${label}: ${r.spec.nodes.length} steps, ${Math.round(r.scorecard.automated * 100)}% converted automatically`);
+    } else {
+      setTab("step");
+      say(`${label}: ${r.spec.nodes.length} steps${c.review ? `, ${c.review} to review` : ""}`);
+    }
+  };
+
+  const doImport = async (mode: ImportMode, text: string, dialect: string) => {
+    setImporting({ mode, busy: true, error: null });
+    const r = mode === "powercenter"
+      ? await engine.importPowercenter(text)
+      : await engine.importSql(text, dialect, Object.fromEntries(tables.entries()), "imported");
+    if (!r.ok) {
+      setImporting({ mode, busy: false, error: r.error });
+      return;
+    }
+    loaded(r, mode === "powercenter" ? "Imported the mapping" : "Imported the SQL");
   };
 
   const loadExample = (name: string) => {
     if (!samples) return;
-    if (name === "__legacy") {
-      setImporting({ open: true, busy: false, error: null });
-      return;
-    }
     setExample(name);
     replaceSpec(samples.specs[name], false);
     setNotes([]);
+    setScorecard(null);
+    setActiveItem(null);
     setSelectedId(null);
+    if (tab === "migration") setTab("step");
   };
 
   const addFiles = async (files: FileList | File[]) => {
@@ -316,57 +373,25 @@ export default function App() {
     window.history.replaceState(null, "", url);
     try {
       await navigator.clipboard.writeText(url);
-      say("Link copied. The pipeline is stored in the link; nothing is uploaded.");
+      say("Link copied. The pipeline lives in the link; nothing is uploaded.");
     } catch {
-      say("Link is in the address bar. Nothing is uploaded.");
+      say("The link is in the address bar. Nothing is uploaded.");
     }
   };
 
   // ---------------------------------------------------------------- render
   const selected = spec?.nodes.find((n) => n.id === selectedId) ?? null;
   const issueCount = analysis?.issues.length ?? 0;
+  const ThemeIcon = theme === "system" ? Monitor : dark ? Moon : Sun;
+  const nextTheme: Record<Theme, Theme> = { system: "light", light: "dark", dark: "system" };
 
   return (
     <div className="app">
-      <header className="bar">
-        <div className="brand">
-          <svg width="22" height="18" viewBox="0 0 22 18" aria-hidden="true">
-            <rect x="0" y="0" width="22" height="4" rx="1" className="strata s1" />
-            <rect x="3" y="7" width="19" height="4" rx="1" className="strata s2" />
-            <rect x="7" y="14" width="15" height="4" rx="1" className="strata s3" />
-          </svg>
-          <span className="brand-name">Redcliff</span>
-          <span className="brand-pipeline">{spec?.name}</span>
-        </div>
-        <nav className="bar-actions" aria-label="Pipeline">
-          <button className="primary" onClick={() => setImporting({ open: true, busy: false, error: null })} disabled={!ready}>
-            Import SQL
-          </button>
-          <label className="visually-hidden" htmlFor="example">Load an example</label>
-          <select id="example" value={example} onChange={(e) => loadExample(e.target.value)}>
-            <option value="" disabled>Examples</option>
-            {samples && Object.keys(samples.specs).map((k) => <option key={k} value={k}>{k.replace(/_/g, " ")}</option>)}
-            <option value="__legacy">legacy Teradata job</option>
-          </select>
-          <button onClick={() => fileInput.current?.click()} disabled={!runnable}>Add CSV</button>
-          <input ref={fileInput} type="file" accept=".csv" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
-          <button onClick={share} disabled={!spec}>Share link</button>
-        </nav>
-      </header>
-
       <main
         className="canvas"
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}
       >
-        {eng.state === "loading" && (
-          <div className="boot" role="status">
-            <div className="boot-strata" aria-hidden="true"><span /><span /><span /></div>
-            <p>Starting the engine in your browser</p>
-            <p className="quiet">Python and DuckDB load once. After that, everything runs on this device.</p>
-          </div>
-        )}
-        {eng.state === "failed" && <div className="boot"><p className="error">The engine didn't start: {eng.error}</p></div>}
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -375,19 +400,115 @@ export default function App() {
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeClick={(_, n) => setSelectedId(n.id)}
+          onNodeDoubleClick={(_, n) => flow.fitView({ nodes: [{ id: n.id }], padding: fitPadding(), maxZoom: 1, duration: 300 })}
+          zoomOnDoubleClick={false}
           onPaneClick={() => { setSelectedId(null); clearFocus(); }}
           fitView
-          fitViewOptions={{ padding: 0.15 }}
-          minZoom={0.2}
+          fitViewOptions={{ padding: fitPadding(), maxZoom: 1.05 }}
+          minZoom={0.1}
           proOptions={{ hideAttribution: true }}
           deleteKeyCode={["Backspace", "Delete"]}
         >
-          <Background gap={24} size={1} />
-          <Controls showInteractive={false} />
+          <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} />
         </ReactFlow>
-        <button className="tidy" onClick={() => setPositions({})}>Tidy layout</button>
-        {toast && <div className="toast" role="status">{toast}</div>}
       </main>
+
+      <header className="topbar glass">
+        <div className="brand">
+          <BrandMark />
+          <span className="brand-name">Redcliff</span>
+          <span className="crumb-sep" aria-hidden="true">/</span>
+          {spec && (
+            <input
+              className="pipeline-name"
+              aria-label="Pipeline name"
+              value={spec.name}
+              spellCheck={false}
+              onChange={(e) => setSpec({ ...spec, name: e.target.value })}
+            />
+          )}
+          {scorecard && (
+            <button className="chip ok" onClick={() => setTab("migration")} title="Open the migration scorecard">
+              <CircleCheck />{Math.round(scorecard.automated * 100)}% automatic
+            </button>
+          )}
+        </div>
+        <nav className="bar-actions" aria-label="Pipeline">
+          <Menu
+            label="Examples"
+            button={({ open, toggle }) => (
+              <button className="btn ghost" onClick={toggle} aria-expanded={open} disabled={!samples}>
+                <BookOpen /><span className="label">Examples</span><ChevronDown className="caret" />
+              </button>
+            )}
+          >
+            {(close) => (
+              <>
+                <div className="menu-label">Pipelines</div>
+                {samples && Object.keys(samples.specs).map((k) => (
+                  <MenuItem key={k} icon={Waypoints} title={k.replace(/_/g, " ")} sub={EXAMPLES[k]}
+                    checked={example === k} onClick={() => { close(); loadExample(k); }} />
+                ))}
+                <div className="menu-sep" />
+                <div className="menu-label">Legacy jobs to import</div>
+                <MenuItem icon={FileCode2} title="Teradata BTEQ job" sub="CTEs, QUALIFY, CREATE TABLE AS"
+                  onClick={() => { close(); setImporting({ mode: "sql", busy: false, error: null }); }} />
+                <MenuItem icon={Workflow} title="PowerCenter mapping" sub="11 transformations, 2 targets"
+                  onClick={() => { close(); setImporting({ mode: "powercenter", busy: false, error: null }); }} />
+              </>
+            )}
+          </Menu>
+          <button className="btn ghost" onClick={() => fileInput.current?.click()} disabled={!runnable} title="Add CSV files as sources">
+            <FileSpreadsheet /><span className="label">Add CSV</span>
+          </button>
+          <input ref={fileInput} type="file" accept=".csv" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
+          <button className="btn ghost icon" onClick={() => setTheme(nextTheme[theme])}
+            aria-label={`Theme: ${theme}`} title={`Theme: ${theme}`}>
+            <ThemeIcon />
+          </button>
+          <span className="bar-divider" />
+          <button className="btn" onClick={share} disabled={!spec} aria-label="Share link" title="Copy a link that holds this pipeline">
+            <Share2 /><span className="label">Share</span>
+          </button>
+          <Menu
+            label="Import"
+            button={({ open, toggle }) => (
+              <button className="btn primary" onClick={toggle} aria-expanded={open} disabled={!ready}>
+                <Upload /><span className="label">Import</span><ChevronDown className="caret" />
+              </button>
+            )}
+          >
+            {(close) => (
+              <>
+                <MenuItem icon={FileCode2} title="SQL script" sub="Teradata, Oracle, SQL Server and more"
+                  onClick={() => { close(); setImporting({ mode: "sql", busy: false, error: null }); }} />
+                <MenuItem icon={Workflow} title="Informatica PowerCenter" sub="Mapping XML, with a migration scorecard"
+                  onClick={() => { close(); setImporting({ mode: "powercenter", busy: false, error: null }); }} />
+              </>
+            )}
+          </Menu>
+        </nav>
+      </header>
+
+      {ready && spec && !selectedId && !highlight && !importing.mode && (
+        <div className="hint glass">
+          <span><MousePointerClick />Hover a column to trace it</span>
+          <span className="dot-sep" />
+          <span>Click it for its blast radius</span>
+          <span className="dot-sep" />
+          <span>Double-click a step to zoom in</span>
+          <span className="dot-sep" />
+          <span><kbd>Esc</kbd> clears</span>
+        </div>
+      )}
+
+      <div className="zoom glass" role="group" aria-label="Zoom">
+        <button className="btn ghost icon" onClick={() => flow.zoomIn({ duration: 150 })} aria-label="Zoom in"><Plus /></button>
+        <button className="btn ghost icon" onClick={() => flow.zoomOut({ duration: 150 })} aria-label="Zoom out"><Minus /></button>
+        <div className="zoom-sep" />
+        <button className="btn ghost icon" onClick={fit} aria-label="Fit to screen" title="Fit to screen"><Maximize /></button>
+        <button className="btn ghost icon" onClick={() => setPositions({})} aria-label="Tidy layout" title="Tidy layout"><WandSparkles /></button>
+      </div>
 
       {spec && (
         <Inspector
@@ -399,6 +520,10 @@ export default function App() {
           impact={impact}
           notes={notes}
           ready={runnable}
+          scorecard={scorecard}
+          activeItem={activeItem}
+          onPickItem={setActiveItem}
+          onSelectStep={(id) => setSelectedId(id)}
           onChangeSpec={(s) => replaceSpec(s)}
           onUpdateStep={updateStep}
           onDeleteStep={deleteStep}
@@ -407,24 +532,55 @@ export default function App() {
         />
       )}
 
-      <footer className="status">
+      <footer className="statusbar glass">
         <span data-testid="engine-status">
+          <span className={`status-dot ${eng.state}`} />
           {eng.state === "ready" ? `Engine ready in ${((eng.ms ?? 0) / 1000).toFixed(1)} s` : eng.state === "failed" ? "Engine failed" : "Starting engine"}
         </span>
-        <span>{spec ? `${spec.nodes.length} steps` : ""}</span>
-        <span className={issueCount ? "status-issues" : ""}>
-          {analysis ? (issueCount ? `${issueCount} ${issueCount === 1 ? "issue" : "issues"}` : "No issues") : ""}
-        </span>
-        <span className="status-note">Runs in your browser. Your data stays on this device.</span>
+        {spec && <><span className="sep" /><span>{spec.nodes.length} steps</span></>}
+        {analysis && (
+          <><span className="sep" /><span className={issueCount ? "issues" : ""}>
+            {issueCount ? `${issueCount} ${issueCount === 1 ? "issue" : "issues"}` : "No issues"}
+          </span></>
+        )}
+        <span className="sep" />
+        <span className="local"><Lock />Runs in your browser</span>
       </footer>
 
-      {importing.open && samples && (
+      {toast && <div className="toast" role="status"><Sparkles />{toast}</div>}
+
+      {eng.state !== "ready" && (
+        <div className="boot" role="status">
+          <div className="boot-card">
+            <div className="boot-mark" aria-hidden="true"><span /><span /><span /></div>
+            {eng.state === "failed" ? (
+              <>
+                <h1>The engine didn't start</h1>
+                <p className="error">{eng.error}</p>
+              </>
+            ) : (
+              <>
+                <h1>Starting Redcliff in your browser</h1>
+                <p>The compiler and lineage engine run here, in Python on WebAssembly. Your data never leaves this tab.</p>
+                <ul className="boot-steps">
+                  <li className={samples ? "done" : "active"}>{samples ? <Check /> : <LoaderCircle className="spin" />}Loading the app and sample data</li>
+                  <li className={dataReady ? "done" : "active"}>{dataReady ? <Check /> : <LoaderCircle className="spin" />}Starting DuckDB for previews</li>
+                  <li className="active"><LoaderCircle className="spin" />Starting Python, sqlglot and the Redcliff engine</li>
+                </ul>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {importing.mode && samples && (
         <ImportDialog
-          initialSql={samples.legacy}
+          mode={importing.mode}
+          samples={{ sql: samples.legacy, powercenter: samples.powercenter }}
           busy={importing.busy}
           error={importing.error}
           onImport={doImport}
-          onClose={() => setImporting({ open: false, busy: false, error: null })}
+          onClose={() => setImporting({ mode: null, busy: false, error: null })}
         />
       )}
     </div>

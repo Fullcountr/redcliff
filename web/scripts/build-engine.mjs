@@ -59,6 +59,7 @@ for (const f of readdirSync(specsDir).filter((f) => f.endsWith(".yaml"))) {
   specs[spec.name] = spec;
 }
 const legacy = readFileSync(join(repo, "examples", "legacy", "teradata_revenue.sql"), "utf8");
-writeFileSync(join(samples, "samples.json"), JSON.stringify({ tables, specs, legacy }, null, 2));
+const powercenter = readFileSync(join(repo, "examples", "legacy", "powercenter", "m_customer_revenue.xml"), "utf8");
+writeFileSync(join(samples, "samples.json"), JSON.stringify({ tables, specs, legacy, powercenter }, null, 2));
 
 console.log(`engine ready: pyodide, ${wheel}, redcliff.zip, ${tables.length} sample tables, ${Object.keys(specs).length} specs`);

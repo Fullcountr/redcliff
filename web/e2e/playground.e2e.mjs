@@ -3,7 +3,8 @@
 //   APP_URL=http://localhost:4173/ CHROMIUM_PATH=/path/to/chrome node playground.e2e.mjs
 //
 // Drives the full loop: engine boot, row counts, lineage hover, blast radius, SQL import,
-// data preview, generated code and share links. Screenshots go to SCREENSHOT_DIR if set.
+// PowerCenter import with its scorecard, data preview, generated code and share links.
+// Screenshots go to SCREENSHOT_DIR if set.
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { chromium } from "playwright-core";
@@ -43,6 +44,13 @@ page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
 const col = (node, column) =>
   page.locator(`.react-flow__node[data-id="${node}"] button.col`, { hasText: new RegExp(`^${column}$`) });
 const rowsOf = (node) => page.locator(`.react-flow__node[data-id="${node}"] .step-rows`);
+// Zoomed out, cards show a big title instead of columns; double-clicking one zooms to it.
+async function zoomTo(node) {
+  await page.locator(`.react-flow__node[data-id="${node}"]`).dblclick();
+  await page.waitForFunction((id) => !document.querySelector(`.react-flow__node[data-id="${id}"] .step.is-far`), node);
+  await page.waitForTimeout(350);
+  await page.mouse.move(5, 300); // the zoom puts a column under the still pointer; move so hovers register
+}
 
 console.log(`Redcliff playground e2e against ${url}`);
 
@@ -78,7 +86,7 @@ await step("clicking a column shows its blast radius", async () => {
   await page.waitForSelector(".impact");
   const text = await page.locator(".impact").innerText();
   assert.match(text, /If orders\.status changes/);
-  assert.match(text, /A rename breaks\s+shipped/);
+  assert.match(text, /A rename breaks\s+1\s+shipped/i);
   assert.ok(await page.locator('.react-flow__node[data-id="revenue_by_region"] .step.rows-change').count() === 1);
   assert.match(await page.locator('.react-flow__node[data-id="shipped"]').innerText(), /Breaks on rename/);
   await shot(page, "03-impact");
@@ -122,10 +130,15 @@ await step("a broken step is flagged, not fatal", async () => {
   await shot(page, "06-issue");
 });
 
+async function openImport(target, item) {
+  await target.locator(".topbar").getByRole("button", { name: "Import" }).click();
+  await target.getByRole("menuitem", { name: new RegExp(item) }).click();
+  await target.waitForSelector("dialog[open]");
+}
+
 await step("importing a legacy Teradata job builds the pipeline", async () => {
-  await page.getByRole("button", { name: "Import SQL" }).click();
-  await page.waitForSelector("dialog[open]");
-  await page.getByRole("button", { name: "Import", exact: true }).click();
+  await openImport(page, "SQL script");
+  await page.locator("dialog").getByRole("button", { name: "Import", exact: true }).click();
   await page.waitForSelector("dialog[open]", { state: "detached" });
   await page.waitForSelector('.react-flow__node[data-id="regional_revenue"]');
   assert.equal(await page.locator(".react-flow__node").count(), 10);
@@ -136,10 +149,36 @@ await step("importing a legacy Teradata job builds the pipeline", async () => {
 });
 
 await step("lineage works on the imported job", async () => {
+  await zoomTo("regional_revenue");
   await col("regional_revenue", "revenue").hover();
   await page.waitForSelector('.react-flow__node[data-id="orders"] button.col.is-lit');
   assert.deepEqual(await page.locator('.react-flow__node[data-id="orders"] button.col.is-lit').allTextContents(), ["amount"]);
   await shot(page, "08-imported-trace");
+  await page.mouse.move(5, 5);
+});
+
+await step("importing a PowerCenter mapping shows its migration scorecard", async () => {
+  await openImport(page, "Informatica PowerCenter");
+  await shot(page, "10-import-dialog");
+  await page.locator("dialog").getByRole("button", { name: "Import", exact: true }).click();
+  await page.waitForSelector("dialog[open]", { state: "detached" });
+  await page.waitForSelector('.react-flow__node[data-id="agg_region_month"]');
+  assert.equal(await page.locator(".react-flow__node").count(), 19);
+  await page.waitForSelector(".score-hero");
+  assert.match(await page.locator(".ring-label").innerText(), /86%/);
+  assert.match(await page.locator('.react-flow__node[data-id="agg_region_month"]').innerText(), /Review/);
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="agg_region_month"] .step-rows')?.textContent === "2 rows", null, { timeout: 30000 });
+  await page.locator(".score-item", { hasText: "LKP_REGION" }).click();
+  await page.waitForFunction(() => document.querySelectorAll(".step.is-scored").length === 3, null, { timeout: 5000 });
+  await shot(page, "11-scorecard");
+  await page.getByRole("tab", { name: "Data" }).click();
+  await page.waitForSelector(".data table tbody tr");
+  await page.keyboard.press("Escape");
+  assert.ok(await page.locator(".step.is-far").count() > 0, "a 19-step mapping starts zoomed out, with big titles");
+  await shot(page, "12-far");
+  await zoomTo("agg_region_month");
+  await col("agg_region_month", "revenue").hover();
+  await page.waitForSelector('.react-flow__node[data-id="orders"] button.col.is-lit');
   await page.mouse.move(5, 5);
 });
 
@@ -149,8 +188,8 @@ await step("a share link restores the pipeline", async () => {
   const link = page.url();
   const fresh = await context.newPage();
   await fresh.goto(link);
-  await fresh.waitForSelector('.react-flow__node[data-id="top_customer_per_region"]', { timeout: 120000 });
-  assert.equal(await fresh.locator(".react-flow__node").count(), 10);
+  await fresh.waitForSelector('.react-flow__node[data-id="agg_region_month"]', { timeout: 120000 });
+  assert.equal(await fresh.locator(".react-flow__node").count(), 19);
   await fresh.close();
 });
 

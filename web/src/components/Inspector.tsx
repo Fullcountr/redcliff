@@ -1,11 +1,16 @@
 import * as yaml from "js-yaml";
-import { useEffect, useState } from "react";
+import {
+  ArrowRight, Check, CircleAlert, Code2, Copy, Download, FileText, Gauge, Keyboard, MousePointerClick,
+  Rows3, SlidersHorizontal, Table2, Trash2, TriangleAlert, Unlink, Waypoints, X,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { query, type QueryResult } from "../engine/duck";
 import { engine } from "../engine/engine";
-import type { Analysis, Impact, Spec, Step, StepType } from "../model";
+import type { Analysis, Impact, Scorecard, ScoreItem, ScoreStatus, Spec, Step, StepType } from "../model";
 import { STEP_LABELS, summarize } from "../model";
+import { STEP_ICONS, StepIcon, highlight } from "../ui";
 
-export type Tab = "step" | "data" | "code" | "spec";
+export type Tab = "step" | "data" | "code" | "spec" | "migration";
 
 type Props = {
   tab: Tab;
@@ -16,6 +21,10 @@ type Props = {
   impact: Impact | null;
   notes: string[];
   ready: boolean;
+  scorecard: Scorecard | null;
+  activeItem: string | null;
+  onPickItem: (name: string | null) => void;
+  onSelectStep: (id: string) => void;
   onChangeSpec: (spec: Spec) => void;
   onUpdateStep: (id: string, params: Record<string, unknown>) => void;
   onDeleteStep: (id: string) => void;
@@ -23,29 +32,34 @@ type Props = {
   onClearFocus: () => void;
 };
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "step", label: "Step" },
-  { id: "data", label: "Data" },
-  { id: "code", label: "Code" },
-  { id: "spec", label: "Spec" },
-];
-
 const ADDABLE: StepType[] = ["filter", "derive", "select", "aggregate", "join", "union", "sql", "target"];
 
 export function Inspector(props: Props) {
-  const { tab, onTab } = props;
+  const { tab, onTab, scorecard } = props;
+  const tabs: { id: Tab; label: string; icon: typeof Table2 }[] = [
+    { id: "step", label: "Step", icon: SlidersHorizontal },
+    { id: "data", label: "Data", icon: Table2 },
+    { id: "code", label: "Code", icon: Code2 },
+    { id: "spec", label: "Spec", icon: FileText },
+  ];
+  if (scorecard) tabs.push({ id: "migration", label: "Migration", icon: Gauge });
   return (
     <aside className="inspector" aria-label="Inspector">
       <div className="tabs" role="tablist">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.id}
             role="tab"
             aria-selected={tab === t.id}
+            aria-label={t.label}
             className={tab === t.id ? "tab is-active" : "tab"}
             onClick={() => onTab(t.id)}
           >
-            {t.label}
+            <t.icon aria-hidden="true" />
+            <span className="tab-label">{t.label}</span>
+            {t.id === "migration" && scorecard && (
+              <span className="tab-badge">{Math.round(scorecard.automated * 100)}%</span>
+            )}
           </button>
         ))}
       </div>
@@ -54,6 +68,7 @@ export function Inspector(props: Props) {
         {tab === "data" && <DataPanel {...props} />}
         {tab === "code" && <CodePanel {...props} />}
         {tab === "spec" && <SpecPanel {...props} />}
+        {tab === "migration" && scorecard && <MigrationPanel {...props} scorecard={scorecard} />}
       </div>
     </aside>
   );
@@ -62,86 +77,139 @@ export function Inspector(props: Props) {
 // ------------------------------------------------------------------ Step
 
 function ImpactCard({ impact, onClear }: { impact: Impact; onClear: () => void }) {
-  const list = (items: string[], empty: string) =>
-    items.length ? <ul className="refs">{items.map((i) => <li key={i}>{i}</li>)}</ul> : <p className="quiet">{empty}</p>;
+  const group = (icon: typeof Unlink, title: string, items: string[], empty: string) => {
+    const Icon = icon;
+    return (
+      <div className="impact-group">
+        <h3><Icon aria-hidden="true" />{title}<span className="count">{items.length}</span></h3>
+        {items.length ? <ul className="refs">{items.map((i) => <li key={i}>{i}</li>)}</ul> : <p className="empty">{empty}</p>}
+      </div>
+    );
+  };
   return (
     <section className="impact" aria-live="polite">
       <div className="impact-head">
         <h2>If <code>{impact.column}</code> changes</h2>
-        <button className="link" onClick={onClear}>Clear</button>
+        <button className="btn ghost sm icon" onClick={onClear} aria-label="Clear"><X /></button>
       </div>
-      <h3>A rename breaks</h3>
-      {list(impact.breaks, "Nothing names this column directly.")}
-      <h3>Rows change in</h3>
-      {list(impact.rows, "No step filters, joins or groups on it.")}
-      <h3>Values change in</h3>
-      {list(impact.values, "No column is computed from it.")}
+      <div className="impact-groups">
+        {group(Unlink, "A rename breaks", impact.breaks, "Nothing names this column directly.")}
+        {group(Rows3, "Rows change in", impact.rows, "No step filters, joins or groups on it.")}
+        {group(Waypoints, "Values change in", impact.values, "No column is computed from it.")}
+      </div>
     </section>
   );
 }
 
-function StepPanel({ spec, analysis, selected, impact, notes, onUpdateStep, onDeleteStep, onAddStep, onChangeSpec, onClearFocus }: Props) {
+function Overview({ spec, analysis, notes }: Props) {
   const issues = analysis?.issues ?? [];
-  if (!selected) {
-    return (
-      <>
-        {impact && <ImpactCard impact={impact} onClear={onClearFocus} />}
-        <section>
-          <label className="field">
-            <span>Pipeline name</span>
-            <input value={spec.name} onChange={(e) => onChangeSpec({ ...spec, name: e.target.value })} />
-          </label>
-          <p className="quiet">
-            Hover a column on a step to trace where it comes from. Click it to see what a change would touch.
-          </p>
-        </section>
-        {notes.length > 0 && (
-          <section>
-            <h2>Import notes</h2>
-            <ul className="notes">{notes.map((n) => <li key={n}>{n}</li>)}</ul>
-          </section>
-        )}
-        <section>
-          <h2>{issues.length ? `${issues.length} ${issues.length === 1 ? "issue" : "issues"}` : "No issues"}</h2>
-          {issues.length > 0 && (
-            <ul className="issues">
-              {issues.map((i, k) => <li key={k}><strong>{i.node ?? "pipeline"}</strong> {i.message}</li>)}
-            </ul>
-          )}
-        </section>
-      </>
-    );
-  }
+  const count = (t: StepType) => spec.nodes.filter((n) => n.type === t).length;
   return (
     <>
-      {impact && <ImpactCard impact={impact} onClear={onClearFocus} />}
-      <StepEditor
-        key={selected.id + JSON.stringify(selected.params)}
-        step={selected}
-        issues={issues.filter((i) => i.node === selected.id).map((i) => i.message)}
-        columns={analysis?.columns[selected.id] ?? []}
-        onApply={(params) => onUpdateStep(selected.id, params)}
-      />
-      <section className="actions">
-        <label className="field">
-          <span>Add a step after this one</span>
-          <select
-            value=""
-            onChange={(e) => e.target.value && onAddStep(e.target.value as StepType)}
-            disabled={selected.type === "target"}
-          >
-            <option value="">Choose a step type</option>
-            {ADDABLE.map((t) => <option key={t} value={t}>{STEP_LABELS[t]}</option>)}
-          </select>
-        </label>
-        <button className="danger" onClick={() => onDeleteStep(selected.id)}>Delete step</button>
+      <section>
+        <h3>Pipeline</h3>
+        <div className="stats">
+          <div className="stat"><b>{spec.nodes.length}</b><span>steps</span></div>
+          <div className="stat"><b>{count("source")}</b><span>sources</span></div>
+          <div className="stat"><b>{count("target")}</b><span>targets</span></div>
+          <div className={`stat ${issues.length ? "bad" : "good"}`}><b>{issues.length}</b><span>issues</span></div>
+        </div>
+      </section>
+      {issues.length > 0 && (
+        <section>
+          <h3>Issues</h3>
+          <ul className="callouts bad issues">
+            {issues.map((i, k) => <li key={k}><CircleAlert /><span><strong>{i.node ?? "pipeline"}</strong>{i.message}</span></li>)}
+          </ul>
+        </section>
+      )}
+      {notes.length > 0 && (
+        <section>
+          <h3>Import notes</h3>
+          <ul className="callouts notes">{notes.map((n) => <li key={n}><TriangleAlert /><span>{n}</span></li>)}</ul>
+        </section>
+      )}
+      <section>
+        <h3>Explore</h3>
+        <ul className="tips">
+          <li><span className="mi-icon"><MousePointerClick /></span><span><b>Hover a column</b>Trace it back to the source columns it comes from.</span></li>
+          <li><span className="mi-icon"><Waypoints /></span><span><b>Click a column</b>See its blast radius: what a change would break, re-filter or recompute.</span></li>
+          <li><span className="mi-icon"><Keyboard /></span><span><b>Select a step</b>Edit it, preview its rows or read the code it compiles to. <kbd>Esc</kbd> clears.</span></li>
+        </ul>
       </section>
     </>
   );
 }
 
-function StepEditor({ step, issues, columns, onApply }: {
-  step: Step; issues: string[]; columns: string[]; onApply: (p: Record<string, unknown>) => void;
+function StepPanel(props: Props) {
+  const { analysis, selected, impact, onUpdateStep, onDeleteStep, onAddStep, onClearFocus, onSelectStep } = props;
+  const issues = analysis?.issues ?? [];
+  if (!selected) {
+    return (
+      <>
+        {impact && <ImpactCard impact={impact} onClear={onClearFocus} />}
+        <Overview {...props} />
+      </>
+    );
+  }
+  const columns = analysis?.columns[selected.id] ?? [];
+  return (
+    <>
+      {impact && <ImpactCard impact={impact} onClear={onClearFocus} />}
+      <section>
+        <div className={`step-hero step-${selected.type}`}>
+          <StepIcon type={selected.type} />
+          <div>
+            <h2>{selected.id}</h2>
+            <span className="step-type">{STEP_LABELS[selected.type]} · {summarize(selected) || "no settings"}</span>
+          </div>
+        </div>
+        {(selected.inputs ?? []).length > 0 && (
+          <div className="field">
+            <span>Reads from</span>
+            <div className="ref-chips">
+              {selected.inputs!.map((i) => (
+                <button key={i} className="ref-chip" onClick={() => onSelectStep(i)}>{i}<ArrowRight aria-hidden="true" /></button>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+      <StepEditor
+        key={selected.id + JSON.stringify(selected.params)}
+        step={selected}
+        issues={issues.filter((i) => i.node === selected.id).map((i) => i.message)}
+        onApply={(params) => onUpdateStep(selected.id, params)}
+      />
+      {columns.length > 0 && (
+        <section>
+          <h3>Outputs {columns.length} columns</h3>
+          <div className="ref-chips">{columns.map((c) => <span key={c} className="ref-chip static">{c}</span>)}</div>
+        </section>
+      )}
+      <section>
+        <h3>Add a step after this one</h3>
+        <div className="add-grid">
+          {ADDABLE.map((t) => {
+            const Icon = STEP_ICONS[t];
+            return (
+              <button key={t} className={`step-${t}`} style={{ ["--t" as string]: `var(--t-${t})` }}
+                onClick={() => onAddStep(t)} disabled={selected.type === "target"}>
+                <Icon aria-hidden="true" />{STEP_LABELS[t]}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+      <section className="row end">
+        <button className="btn ghost danger sm" onClick={() => onDeleteStep(selected.id)}><Trash2 />Delete step</button>
+      </section>
+    </>
+  );
+}
+
+function StepEditor({ step, issues, onApply }: {
+  step: Step; issues: string[]; onApply: (p: Record<string, unknown>) => void;
 }) {
   const [text, setText] = useState(() => yaml.dump(step.params ?? {}, { lineWidth: 80 }));
   const [error, setError] = useState<string | null>(null);
@@ -157,11 +225,11 @@ function StepEditor({ step, issues, columns, onApply }: {
   };
   return (
     <section>
-      <p className="step-kicker">{STEP_LABELS[step.type]}</p>
-      <h2 className="step-title">{step.id}</h2>
-      <p className="quiet mono">{summarize(step)}</p>
-      {(step.inputs ?? []).length > 0 && <p className="quiet">Reads from {step.inputs!.join(", ")}</p>}
-      {issues.length > 0 && <ul className="issues">{issues.map((i) => <li key={i}>{i}</li>)}</ul>}
+      {issues.length > 0 && (
+        <ul className="callouts bad" style={{ marginBottom: 12 }}>
+          {issues.map((i) => <li key={i}><CircleAlert /><span>{i}</span></li>)}
+        </ul>
+      )}
       <label className="field">
         <span>Settings</span>
         <textarea
@@ -174,8 +242,10 @@ function StepEditor({ step, issues, columns, onApply }: {
         />
       </label>
       {error && <p className="error">{error}</p>}
-      <button className="primary" onClick={apply}>Apply changes</button>
-      {columns.length > 0 && <p className="quiet">Outputs {columns.length} columns: {columns.join(", ")}</p>}
+      <div className="row between">
+        <span className="faint" style={{ fontSize: 12 }}>YAML, the same as in the spec</span>
+        <button className="btn primary sm" onClick={apply}>Apply changes<span className="shortcut">⌘↵</span></button>
+      </div>
     </section>
   );
 }
@@ -206,20 +276,24 @@ function DataPanel({ spec, selected, analysis, ready }: Props) {
 
   if (!nodeId) return <p className="quiet">Add a step to preview its data.</p>;
   if (analysis && !analysis.valid) return <p className="error">Fix the pipeline's issues to preview data.</p>;
+  const numeric = result?.columns.map((_, j) => result.rows.length > 0 && result.rows.every((r) => r[j] === null || typeof r[j] === "number" || /^-?\d+(\.\d+)?$/.test(String(r[j])))) ?? [];
   return (
     <section className="data">
-      <h2>{state.shown ?? nodeId}</h2>
-      <p className="quiet">
-        {state.loading ? "Running in your browser…" : result ? `First ${Math.min(result.rows.length, 200)} rows` : ""}
-      </p>
+      <div className="section-head">
+        <h2 className="mono" style={{ fontSize: 14 }}>{state.shown ?? nodeId}</h2>
+        <span className="chip">
+          {state.loading ? "Running…" : result ? `${result.rows.length < 200 ? result.rows.length : "first 200"} rows` : ""}
+        </span>
+      </div>
+      <p className="quiet" style={{ fontSize: 12 }}>Computed by DuckDB in this tab. Select another step to preview it.</p>
       {state.error && <p className="error">{state.error}</p>}
       {result && !state.error && (
         <div className="table-wrap">
           <table>
-            <thead><tr>{result.columns.map((c) => <th key={c} scope="col">{c}</th>)}</tr></thead>
+            <thead><tr>{result.columns.map((c, j) => <th key={c} scope="col" className={numeric[j] ? "num" : ""}>{c}</th>)}</tr></thead>
             <tbody>
               {result.rows.map((r, i) => (
-                <tr key={i}>{r.map((v, j) => <td key={j} className={typeof v === "number" || /^-?\d+(\.\d+)?$/.test(String(v)) ? "num" : ""}>{v === null ? <span className="null">null</span> : String(v)}</td>)}</tr>
+                <tr key={i}>{r.map((v, j) => <td key={j} className={numeric[j] ? "num" : ""}>{v === null ? <span className="null">null</span> : String(v)}</td>)}</tr>
               ))}
             </tbody>
           </table>
@@ -251,32 +325,52 @@ function CodePanel({ spec, selected, ready }: Props) {
     });
     return () => { live = false; };
   }, [spec, target, stepScope, selected, ready]);
+  const coloured = useMemo(() => highlight(code, target === "pyspark"), [code, target]);
+  const base = stepScope ? selected!.id : spec.name || "pipeline";
+  const fileName = target === "pyspark" ? `${base}.py` : `${base}.${target === "spark" ? "spark" : "duckdb"}.sql`;
   return (
     <section className="code">
-      <div className="segmented" role="group" aria-label="Language">
-        {TARGETS.map((t) => (
-          <button key={t.id} aria-pressed={target === t.id} onClick={() => setTarget(t.id)}>{t.label}</button>
-        ))}
+      <div className="row between">
+        <div className="segmented" role="group" aria-label="Language">
+          {TARGETS.map((t) => (
+            <button key={t.id} aria-pressed={target === t.id} onClick={() => setTarget(t.id)}>{t.label}</button>
+          ))}
+        </div>
       </div>
       {selected && selected.type !== "target" && target !== "pyspark" && (
-        <div className="segmented small" role="group" aria-label="Scope">
+        <div className="segmented small" role="group" aria-label="Scope" style={{ marginTop: 8 }}>
           <button aria-pressed={scope === "pipeline"} onClick={() => setScope("pipeline")}>Whole pipeline</button>
           <button aria-pressed={scope === "step"} onClick={() => setScope("step")}>Up to {selected.id}</button>
         </div>
       )}
-      <pre className="code-block"><code>{code}</code></pre>
-      <button
-        onClick={async () => {
-          try { await navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard blocked */ }
-        }}
-      >
-        {copied ? "Copied" : "Copy code"}
-      </button>
+      <div className="code-shell">
+        <div className="code-head">
+          <span className="code-file">{fileName}</span>
+          <button
+            className="btn sm copy"
+            onClick={async () => {
+              try { await navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard blocked */ }
+            }}
+          >
+            {copied ? <Check /> : <Copy />}{copied ? "Copied" : "Copy code"}
+          </button>
+        </div>
+        <pre className="code-block"><code>{coloured}</code></pre>
+      </div>
     </section>
   );
 }
 
 // ------------------------------------------------------------------ Spec
+
+function download(name: string, text: string, type: string) {
+  const blob = new Blob([text], { type });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 function SpecPanel({ spec, onChangeSpec }: Props) {
   const [text, setText] = useState(() => yaml.dump(spec, { lineWidth: 100, flowLevel: 4 }));
@@ -292,23 +386,138 @@ function SpecPanel({ spec, onChangeSpec }: Props) {
       setError(e instanceof Error ? e.message.split("\n")[0] : String(e));
     }
   };
-  const download = () => {
-    const blob = new Blob([text], { type: "text/yaml" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${spec.name || "pipeline"}.yaml`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
   return (
     <section className="spec">
-      <p className="quiet">The pipeline spec is the source of truth. Edit it here or on the canvas.</p>
+      <p className="quiet" style={{ fontSize: 12.5 }}>
+        The spec is the source of truth. The canvas edits it; code and lineage are generated from it.
+      </p>
       <textarea className="code-input tall" value={text} spellCheck={false} onChange={(e) => setText(e.target.value)} aria-label="Pipeline spec (YAML)" />
       {error && <p className="error">{error}</p>}
-      <div className="row">
-        <button className="primary" onClick={apply}>Apply spec</button>
-        <button onClick={download}>Download YAML</button>
+      <div className="row between" style={{ marginTop: 10 }}>
+        <button className="btn sm" onClick={() => download(`${spec.name || "pipeline"}.yaml`, text, "text/yaml")}><Download />Download YAML</button>
+        <button className="btn primary sm" onClick={apply}>Apply spec</button>
       </div>
     </section>
+  );
+}
+
+// ------------------------------------------------------------------ Migration
+
+const STATUS_LABEL: Record<ScoreStatus, string> = { converted: "Converted", review: "Review", manual: "Rewrite" };
+
+function Ring({ card }: { card: Scorecard }) {
+  const total = card.items.length || 1;
+  const r = 38;
+  const c = 2 * Math.PI * r;
+  let offset = 0;
+  const segs = (["converted", "review", "manual"] as ScoreStatus[]).map((s) => {
+    const len = (card.counts[s] / total) * c;
+    const seg = { s, len, offset };
+    offset += len;
+    return seg;
+  });
+  const color = { converted: "var(--ok)", review: "var(--warn)", manual: "var(--bad)" };
+  return (
+    <div className="ring" role="img" aria-label={`${Math.round(card.automated * 100)}% converted automatically`}>
+      <svg viewBox="0 0 88 88">
+        <circle className="track" cx="44" cy="44" r={r} />
+        {segs.filter((g) => g.len > 0).map((g) => (
+          <circle key={g.s} className="seg" cx="44" cy="44" r={r} stroke={color[g.s]}
+            strokeDasharray={`${Math.max(g.len - 2, 0.5)} ${c}`} strokeDashoffset={-g.offset} />
+        ))}
+      </svg>
+      <div className="ring-label"><b>{Math.round(card.automated * 100)}%</b><span>automatic</span></div>
+    </div>
+  );
+}
+
+function MigrationPanel({ scorecard: card, activeItem, onPickItem, onTab, onSelectStep }: Props & { scorecard: Scorecard }) {
+  const [filter, setFilter] = useState<"all" | ScoreStatus>("all");
+  const order: Record<ScoreStatus, number> = { manual: 0, review: 1, converted: 2 };
+  const items = [...card.items]
+    .filter((i) => filter === "all" || i.status === filter)
+    .sort((a, b) => order[a.status] - order[b.status]);
+  const lin = card.lineage;
+  const source = card.origin === "powercenter" ? "Informatica PowerCenter" : "SQL";
+  const markdown = () => {
+    const lines = [`# Migration scorecard: ${card.title}`, "",
+      `${card.counts.converted} of ${card.items.length} converted automatically (${Math.round(card.automated * 100)}%), ` +
+      `${card.counts.review} to review, ${card.counts.manual} to rewrite by hand.`,
+      `Lineage: ${lin.traced} of ${lin.columns} target columns trace back to a source.`, "",
+      "| Status | Name | Type | Became | Notes |", "| --- | --- | --- | --- | --- |",
+      ...[...card.items].sort((a, b) => order[a.status] - order[b.status]).map((i) =>
+        `| ${i.status} | ${i.name} | ${i.kind} | ${i.nodes.map((n) => `\`${n}\``).join(", ") || "–"} | ${i.notes.join("<br>").replace(/\|/g, "\\|")} |`)];
+    return lines.join("\n") + "\n";
+  };
+  const pick = (item: ScoreItem) => {
+    const next = activeItem === item.name ? null : item.name;
+    onPickItem(next);
+    if (next && item.nodes.length) onSelectStep(item.nodes[item.nodes.length - 1]);
+  };
+  return (
+    <>
+      <section>
+        <div className="score-hero">
+          <Ring card={card} />
+          <div className="score-text">
+            <h2>{card.title}</h2>
+            <p>{card.items.length} {card.origin === "powercenter" ? "instances" : "statements"} from {source}</p>
+            <div className="score-legend">
+              <span className="chip ok">{card.counts.converted} converted</span>
+              <span className="chip warn">{card.counts.review} review</span>
+              <span className={`chip ${card.counts.manual ? "bad" : ""}`}>{card.counts.manual} rewrite</span>
+            </div>
+          </div>
+        </div>
+        {lin.columns > 0 && (
+          <div className="lineage-bar">
+            <div className="row"><span>Column lineage to a source</span><b className="num">{lin.traced} / {lin.columns}</b></div>
+            <div className="bar-track"><div className="bar-fill" style={{ width: `${(lin.traced / lin.columns) * 100}%` }} /></div>
+            {lin.untraced.length > 0 && (
+              <p className="faint" style={{ fontSize: 11.5, marginTop: 6 }}>
+                No source column (constants or placeholders): <span className="mono">{lin.untraced.join(", ")}</span>
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+      <section>
+        <div className="row between filters">
+          <div className="segmented small" role="group" aria-label="Filter">
+            {(["all", "review", "manual", "converted"] as const).map((f) => (
+              <button key={f} aria-pressed={filter === f} onClick={() => setFilter(f)}>
+                {f === "all" ? `All ${card.items.length}` : `${STATUS_LABEL[f]} ${card.counts[f]}`}
+              </button>
+            ))}
+          </div>
+          <button className="btn sm ghost" onClick={() => download(`${card.title}-scorecard.md`, markdown(), "text/markdown")}>
+            <Download />Report
+          </button>
+        </div>
+        <ul className="score-items">
+          {items.map((item) => (
+            <li key={item.name}>
+              <button className={`score-item${activeItem === item.name ? " is-active" : ""}`} onClick={() => pick(item)}>
+                <div className="score-item-head">
+                  <span className={`score-dot ${item.status}`} aria-label={item.status} />
+                  <span className="name">{item.name}</span>
+                  <span className="kind">{item.kind}</span>
+                </div>
+                {item.status !== "converted" && item.notes.length > 0 && (
+                  <ul>{item.notes.map((n) => <li key={n}>{n}</li>)}</ul>
+                )}
+                {item.nodes.length > 0 && (
+                  <div className="became"><ArrowRight aria-hidden="true" />{item.nodes.map((n) => <span key={n}>{n}</span>)}</div>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+        {items.length === 0 && <p className="faint">Nothing here.</p>}
+        <p className="faint" style={{ fontSize: 11.5, marginTop: 12 }}>
+          Pick an item to find the steps it became. <button className="link-btn" onClick={() => onTab("code")}>See the generated code</button>
+        </p>
+      </section>
+    </>
   );
 }

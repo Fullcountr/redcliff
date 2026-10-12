@@ -30,6 +30,19 @@ export type Analysis = {
 
 export type Impact = { column: string; values: string[]; rows: string[]; breaks: string[] };
 
+export type ScoreStatus = "converted" | "review" | "manual";
+export type ScoreItem = { name: string; kind: string; status: ScoreStatus; nodes: string[]; notes: string[] };
+export type Scorecard = {
+  origin: "powercenter" | "sql";
+  title: string;
+  counts: Record<ScoreStatus, number>;
+  automated: number;
+  items: ScoreItem[];
+  functions: Record<string, number>;
+  lineage: { columns: number; traced: number; untraced: string[] };
+};
+export type ImportResult = { spec: Spec; warnings: string[]; outputs: string[]; scorecard: Scorecard; mappings?: string[] };
+
 export const STEP_LABELS: Record<StepType, string> = {
   source: "Source",
   filter: "Filter",
