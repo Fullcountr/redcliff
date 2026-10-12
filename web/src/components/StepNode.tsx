@@ -30,7 +30,7 @@ function rows(n: number | null | undefined): string {
 const SCORE_COLOR: Record<ScoreStatus, string> = { converted: "var(--ok)", review: "var(--warn)", manual: "var(--bad)" };
 
 /** Below this zoom, cards trade their column lists for a large, readable title. */
-export const FAR_ZOOM = 0.62;
+export const FAR_ZOOM = 0.5;
 
 function StepNodeView({ data }: NodeProps<StepNodeType>) {
   const { step, columns, rowCount, issues, highlight, selected, score, scored } = data;

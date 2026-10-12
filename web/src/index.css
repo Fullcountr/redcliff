@@ -532,7 +532,7 @@ kbd {
 .far-id {
   flex: none;
   font-weight: 650; letter-spacing: -0.02em; color: var(--text);
-  font-size: min(calc(14px / var(--z)), 38px); line-height: 1.1;
+  font-size: min(calc(14px / var(--z)), 30px); line-height: 1.1;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
 .far-flag { font-weight: 650; padding: 0 0.45em; border-radius: 0.4em; }

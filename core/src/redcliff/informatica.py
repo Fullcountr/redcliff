@@ -435,9 +435,11 @@ class _Parser:
 
     def fn_is_date(self, a):
         self.arity("IS_DATE", a, 1, 2)
-        fmt = self.date_format(a[1] if len(a) == 2 else None, "IS_DATE")
-        parsed = exp.StrToTime(this=a[0], format=exp.Literal.string(fmt), safe=True)
-        return exp.Not(this=exp.Is(this=parsed, expression=exp.null()))
+        # A "try to parse" with a format doesn't survive neutral SQL (the safe flag is dropped), and
+        # a failing parse would error instead of returning FALSE. Say so rather than guess.
+        self.note(MANUAL, "IS_DATE() has no portable SQL equivalent yet (DuckDB: TRY_STRPTIME, "
+                          "Spark: TRY_TO_TIMESTAMP); a NULL placeholder stands in")
+        return exp.null()
 
     def trim(self, a, position: str | None, name: str):
         self.arity(name, a, 1, 2)

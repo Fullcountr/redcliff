@@ -85,6 +85,7 @@ def test_aggregates_with_filter_conditions():
     ("IIF(AMOUNT < 0, ERROR('negative'), AMOUNT)", "review", "ERROR() rejects the row"),
     ("DATE_DIFF(ORDER_DATE, ORDER_DATE, 'MM')", "review", "fractional"),
     ("IN(STATUS, 'A', 'B', 0)", "review", "case-insensitively"),
+    ("IS_DATE(S, 'YYYY-MM-DD')", "manual", "IS_DATE() has no portable SQL equivalent"),
 ])
 def test_honest_statuses(text, status, note):
     t = translate(text, resolve)

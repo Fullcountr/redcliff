@@ -6,8 +6,9 @@
 
 <p align="center">
   <strong>Legacy ETL in, clean Spark out.</strong><br>
-  Paste a 300-line Teradata job. Get a pipeline you can see, column lineage you can trust,<br>
-  and Spark code you own. In your browser, with nothing uploaded.
+  Paste a 300-line Teradata job or drop in an Informatica mapping. Get a pipeline you can see,<br>
+  column lineage you can trust, an honest migration scorecard, and Spark code you own.<br>
+  In your browser, with nothing uploaded.
 </p>
 
 <p align="center">
@@ -22,12 +23,9 @@
   &nbsp;·&nbsp; no install, no sign-up; your data never leaves the tab
 </p>
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/trace-dark.png">
-  <img src="docs/images/trace-light.png" alt="The Redcliff playground. Hovering the revenue column traces it in red back through an aggregate, a join and a filter to orders.amount, while unrelated steps fade.">
-</picture>
+<img src="docs/images/demo.gif" alt="A 30-second tour of the Redcliff playground: hovering a column traces its lineage, clicking one shows its blast radius, an Informatica PowerCenter mapping is imported with an 86% migration scorecard, a revenue column is traced through the whole mapping, and the generated Spark SQL and PySpark are shown.">
 
-<p align="center"><sub>Hover <code>revenue</code> and Redcliff traces it back to <code>orders.amount</code>, through the aggregate, the join and the filter. Everything else fades.</sub></p>
+<p align="center"><sub>Trace a column, see its blast radius, import an Informatica mapping with its migration scorecard, and read the Spark code. 30 seconds, all in the browser.</sub></p>
 
 ---
 
@@ -54,7 +52,8 @@ compression, cached after that), so give it a moment. Then everything runs in th
 nothing is sent anywhere.
 
 A sample pipeline loads with live row counts. Hover any column. Click one. Then press
-**Import SQL** and import the legacy Teradata job that's already filled in.
+**Import** and pick the legacy Teradata job or the Informatica PowerCenter mapping; both are
+already filled in.
 
 **Run it yourself:**
 
@@ -75,13 +74,15 @@ pip install -e ".[cli]"
 redcliff import ../examples/legacy/teradata_revenue.sql --dialect teradata \
   --schema ../examples/legacy/schema.json -o pipeline.yaml
 redcliff lineage pipeline.yaml --impact orders.status
+redcliff import ../examples/legacy/powercenter/m_customer_revenue.xml \
+  -o mapping.yaml --scorecard scorecard.md
 ```
 
 ---
 
 ## Topsoil: what Redcliff does
 
-Redcliff turns SQL, including the legacy kind nobody wants to touch, into a **pipeline spec**:
+Redcliff turns legacy jobs, SQL scripts and Informatica mappings nobody wants to touch, into a **pipeline spec**:
 a small YAML file in Git that describes each step. Everything else is generated from that spec,
 so the picture, the lineage and the code can never drift apart.
 
@@ -97,43 +98,49 @@ step, with a note. Nothing is dropped silently.
 </td>
 <td width="50%" valign="top">
 
+**Import Informatica PowerCenter mappings.** Source qualifiers, expressions, joiners, lookups,
+routers, aggregators and more become steps, and the Informatica expression language becomes SQL
+that keeps its quirks. A **migration scorecard** grades every transformation: converted, needs
+review, or rewrite by hand, with the reason.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
 **See column-level lineage.** Hover a column to trace every column that feeds it, back to the
 sources. Redcliff owns the graph, so lineage is computed from the pipeline itself, not guessed
 from query logs after the fact.
 
 </td>
-</tr>
-<tr>
 <td valign="top">
 
 **Know the blast radius before you change anything.** Click a column to see which values would
 change, which steps' rows would change, and which steps would break if you renamed it.
 
 </td>
+</tr>
+<tr>
 <td valign="top">
 
 **Generate code you own.** Readable Spark SQL, PySpark or DuckDB SQL, one named block per step,
 each with a comment. No runtime, no lock-in: it's your code in your repo.
 
 </td>
-</tr>
-<tr>
 <td valign="top">
 
 **Check it on real rows.** Every step shows its row count and previews its data, computed by
-DuckDB inside your browser. Drop in your own CSV files to try your own data.
-
-</td>
-<td valign="top">
-
-**Share it as a link.** The whole pipeline is compressed into the URL. Whoever opens it sees the
-same graph, lineage and code. Nothing is stored on a server, because there is no server.
+DuckDB inside your browser. Drop in your own CSV files to try your own data. Share the whole
+pipeline as a link; there is no server to store it on.
 
 </td>
 </tr>
 </table>
 
-<img src="docs/images/blast-radius.png" alt="Blast radius of orders.status: the filter that names it is marked 'Breaks on rename', every downstream step is outlined as 'Rows change', and the inspector lists exactly what is affected.">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/blast-radius-dark.png">
+  <img src="docs/images/blast-radius-light.png" alt="Blast radius of orders.status: the filter that names it is marked 'Breaks on rename', every downstream step is outlined as 'Rows change', and the inspector lists exactly what is affected.">
+</picture>
 
 <p align="center"><sub>Click <code>orders.status</code>: the filter that names it would break on a rename, and every step after it would see different rows.</sub></p>
 
@@ -227,7 +234,53 @@ customer_totals AS (
 runs the converted job locally. The test suite runs both the original SQL and the converted
 pipeline against the same data and requires identical rows.
 
-<img src="docs/images/imported-job.png" alt="The imported Teradata job in the playground: ten steps from sources through aggregates and a join to two targets, with generated Spark SQL in the inspector.">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/imported-job-dark.png">
+  <img src="docs/images/imported-job-light.png" alt="The imported Teradata job in the playground: ten steps from sources through aggregates and a join to two targets, with generated Spark SQL in the inspector.">
+</picture>
+
+### And an Informatica mapping
+
+[`examples/legacy/powercenter/m_customer_revenue.xml`](examples/legacy/powercenter/m_customer_revenue.xml)
+is an invented PowerCenter export: source qualifiers with a source filter, an expression with a
+variable port, a master outer joiner, a lookup, a router with a DEFAULT group, an aggregator, an
+update strategy and a sequence generator.
+
+```text
+$ redcliff import m_customer_revenue.xml -o pipeline.yaml --scorecard scorecard.md
+imported 19 nodes (2 targets) to pipeline.yaml
+warning: AGG_REGION_MONTH: MANAGER isn't grouped or aggregated; PowerCenter returns the last row's value, ANY_VALUE() returns any row's
+warning: SEQ_EXCEPTION_ID: becomes ROW_NUMBER() where it is used, so numbers restart every run; PowerCenter keeps counting across runs. Use a surrogate key strategy in the target.
+scorecard: 12 of 14 converted (86%), 2 to review, 0 to rewrite by hand
+```
+
+The expression `v_FIRST || ' ' || LTRIM(RTRIM(LAST_NAME))` becomes SQL that keeps PowerCenter's
+habit of treating NULL as an empty string, and the steps keep the mapping's names, so a reviewer
+can find `EXP_CLEAN_CUSTOMER` in both:
+
+```yaml
+- id: exp_clean_customer
+  type: derive
+  inputs: [sq_customers]
+  params:
+    columns:
+      full_name: CONCAT(COALESCE(TRIM(first_name), ''), ' ', COALESCE(TRIM(last_name), ''))
+      email: CASE WHEN email IS NULL OR TRIM(email) = '' THEN NULL ELSE LOWER(TRIM(email)) END
+      region: CASE WHEN region IS NULL THEN 'UNKNOWN' ELSE UPPER(TRIM(region)) END
+```
+
+Lineage runs across the whole mapping, lookup included:
+
+```text
+$ redcliff lineage pipeline.yaml --column region_monthly_revenue.manager
+region_monthly_revenue.manager comes from:
+  regions.manager  (direct, aggregation)
+```
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/scorecard-dark.png">
+  <img src="docs/images/scorecard-light.png" alt="The PowerCenter mapping imported into the playground: nineteen steps, zoomed out to show each step's name, with the migration scorecard open: 86% converted automatically, 2 items to review with their reasons, and 12 of 13 target columns traced to a source.">
+</picture>
 
 ---
 
@@ -289,11 +342,31 @@ One subtle case it handles: when two joined tables share a column name and the q
 right-hand copy, Redcliff renames that copy before the join, so no value is lost. Details are in
 [`docs/importer.md`](docs/importer.md).
 
+### The PowerCenter importer
+
+| PowerCenter | Becomes |
+| --- | --- |
+| Source Qualifier | the SQL it would run, through the SQL importer: source filter, user-defined join, foreign keys, distinct, or the SQL override itself |
+| Expression | `derive`, with variable ports inlined |
+| Filter, Router | `filter` (one per router group in use, DEFAULT included) |
+| Aggregator | `aggregate`, including `SUM(x, condition)` |
+| Joiner, connected Lookup | `join` (a lookup is de-duplicated by its keys first) |
+| Union | `select` per group, then `union` |
+| Sorter, Update Strategy | nothing, or a distinct `aggregate`, or a `filter` that drops rejected rows |
+| Sequence Generator | `ROW_NUMBER()`, flagged for review |
+| Mapplets, Normalizer, Java and others | a typed placeholder, flagged as manual |
+
+The expression language (`IIF`, `DECODE`, `TO_DATE`, `ADD_TO_DATE`, `$$PARAMS` and about 50
+more) is translated with PowerCenter's semantics where SQL differs. A folder export becomes one
+pipeline, connected through the tables its mappings write and read. The full list is in
+[`docs/powercenter.md`](docs/powercenter.md).
+
 ### The command line
 
 | Command | Does |
 | --- | --- |
 | `redcliff import FILE.sql --dialect D [--schema S] -o pipeline.yaml` | SQL to spec |
+| `redcliff import MAPPING.xml [--mapping NAME] [--scorecard report.md] -o pipeline.yaml` | PowerCenter export to spec, with a scorecard |
 | `redcliff validate pipeline.yaml` | structure plus column-level checks |
 | `redcliff compile pipeline.yaml --to spark\|pyspark\|duckdb [--node ID]` | generate code |
 | `redcliff lineage pipeline.yaml [--column N.C \| --impact N.C \| --openlineage N]` | lineage |
@@ -306,7 +379,7 @@ right-hand copy, Redcliff renames that copy before the join, so no value is lost
 ```mermaid
 flowchart LR
   canvas[Canvas] --> spec
-  importer[SQL importer] --> spec
+  importer[SQL and PowerCenter<br/>importers] --> spec
   spec[(Pipeline spec<br/>YAML in Git)] --> compiler[Compiler]
   spec --> lineage[Lineage engine]
   compiler --> code[Spark SQL<br/>PySpark<br/>DuckDB SQL]
@@ -330,8 +403,10 @@ flowchart LR
 | Compiler | generated DuckDB SQL runs on sample data and must match rows worked out by hand |
 | Lineage | each example's column map compared against one worked out by hand |
 | Importer | the original SQL and the imported, recompiled pipeline must return identical rows |
+| PowerCenter | the sample mapping runs in DuckDB and must match rows worked out by hand; every transformation type and scorecard status has a test |
+| Expressions | each Informatica expression runs in DuckDB and must return PowerCenter's answer |
 | CLI | a legacy Teradata job goes through import, validate, compile, lineage and run |
-| Browser | headless Chromium drives the real app: boot, hover, blast radius, import, preview, edit, share, phone layout |
+| Browser | headless Chromium drives the real app: boot, hover, blast radius, SQL and PowerCenter import, scorecard, preview, edit, share, phone layout; after every deploy it runs again against the live site |
 
 CI runs all of it, including the browser test, on every push. Spark SQL is checked by parsing
 and PySpark by compiling; running them against a real Spark cluster is on the roadmap.
@@ -342,8 +417,8 @@ and PySpark by compiling; running them against a real Spark cluster is on the ro
 | --- | --- |
 | [`core/`](core) | the Python package: spec, compiler, lineage, importer, CLI, browser bridge |
 | [`web/`](web) | the playground: React, React Flow, Pyodide worker, DuckDB-Wasm |
-| [`examples/`](examples) | sample data, example pipelines and the legacy Teradata job |
-| [`docs/`](docs) | spec reference, architecture notes, importer guide |
+| [`examples/`](examples) | sample data, example pipelines, a legacy Teradata job and a PowerCenter mapping |
+| [`docs/`](docs) | spec reference, architecture notes, SQL and PowerCenter importer guides |
 | [`spikes/`](spikes) | small experiments that proved an approach |
 
 ---
@@ -354,7 +429,7 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 
 | | Open source | Runs where | Legacy SQL import | Column lineage built in |
 | --- | --- | --- | --- | --- |
-| **Redcliff** | yes, Apache 2.0 | anywhere; generates Spark SQL, PySpark, DuckDB SQL | yes, 11 dialects | yes |
+| **Redcliff** | yes, Apache 2.0 | anywhere; generates Spark SQL, PySpark, DuckDB SQL | yes: 11 SQL dialects and Informatica PowerCenter | yes |
 | Prophecy | no | Spark and SQL platforms | yes, including Ab Initio (paid) | yes |
 | Databricks Lakeflow Designer | no | Databricks | no | through Unity Catalog |
 | dbt Canvas | no | dbt platform, Enterprise plans | no | through dbt |
@@ -374,7 +449,8 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 - [x] SQL importer for 11 dialects, with BTEQ support
 - [x] Command line
 - [x] Browser playground with previews and share links
-- [ ] Informatica PowerCenter XML importer, with a migration scorecard
+- [x] Informatica PowerCenter XML importer, with a migration scorecard
+- [ ] Mapplet expansion and session/workflow import (pre/post SQL, parameter files)
 - [ ] Spark SQL and PySpark run against real Spark in CI
 - [ ] Row-level trace: click an output row, see the input rows behind it
 - [ ] MCP server, so AI agents can edit pipelines and show a diff before you accept
@@ -396,9 +472,14 @@ that matters; this is alpha software.
 **Why Python in the browser instead of JavaScript?**
 So there is exactly one engine. The CLI, the tests and the playground all run the same code.
 
-**My SQL didn't import cleanly.**
-Please [open an issue](https://github.com/Fullcountr/redcliff/issues) with a small,
-anonymized example. Never share an employer's or client's real code.
+**How honest is the migration scorecard?**
+It only says "converted" when the generated SQL means the same thing. Anything that differs in
+an edge case (row order, NULL handling, values carried across runs) is "review", with the reason.
+Anything with no translation yet is "manual" and gets a typed placeholder, never a silent drop.
+
+**My SQL or mapping didn't import cleanly.**
+Please [open an issue](https://github.com/Fullcountr/redcliff/issues) with a small, invented
+example that shows the problem. Never share an employer's or client's real code or mappings.
 
 ---
 
