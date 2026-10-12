@@ -51,6 +51,7 @@ export const engine = {
     call<{ sql: string }>("source_rows", json(spec), source, JSON.stringify(rows)),
   importSql: (sql: string, dialect: string, schema: Record<string, Record<string, string>>, name: string) =>
     call<ImportResult>("import_sql", sql, dialect, JSON.stringify(schema), name),
+  importSsis: (xml: string) => call<ImportResult>("import_ssis", xml),
   importPowercenter: (xml: string, params?: string) => call<ImportResult>("import_powercenter", xml, null, params || null),
   impact: (spec: Spec, node: string, column: string) => call<Impact>("impact", json(spec), node, column),
 };

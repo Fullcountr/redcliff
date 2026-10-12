@@ -1,0 +1,526 @@
+<?xml version="1.0"?>
+<!-- An invented SSIS package for Redcliff's examples and tests. Not from any real system.
+     The region revenue job again, built the SSIS way: a conditional split on status, derived
+     columns, sorts and a merge join, a lookup, an aggregate, and Execute SQL tasks around it. -->
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts" DTS:refId="Package" DTS:CreationName="Microsoft.Package" DTS:ExecutableType="Microsoft.Package" DTS:ObjectName="LoadRegionRevenue" DTS:Description="Invented example: nightly region revenue load">
+  <DTS:Property DTS:Name="PackageFormatVersion">8</DTS:Property>
+  <DTS:ConnectionManagers>
+    <DTS:ConnectionManager DTS:refId="Package.ConnectionManagers[SalesDW]" DTS:CreationName="OLEDB" DTS:ObjectName="SalesDW">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager DTS:ConnectionString="Data Source=localhost;Initial Catalog=SalesDW;Provider=SQLNCLI11.1;Integrated Security=SSPI;" />
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+  </DTS:ConnectionManagers>
+  <DTS:Variables>
+    <DTS:Variable DTS:CreationName="" DTS:DTSID="{00000000-0000-0000-0000-000000000006}" DTS:IncludeInDebugDump="2345" DTS:Namespace="User" DTS:ObjectName="FxRate">
+      <DTS:VariableValue DTS:DataType="5">1.0</DTS:VariableValue>
+    </DTS:Variable>
+    <DTS:Variable DTS:CreationName="" DTS:DTSID="{00000000-0000-0000-0000-000000000014}" DTS:IncludeInDebugDump="2345" DTS:Namespace="User" DTS:ObjectName="CancelledCount">
+      <DTS:VariableValue DTS:DataType="3">0</DTS:VariableValue>
+    </DTS:Variable>
+  </DTS:Variables>
+  <DTS:Executables>
+    <DTS:Executable DTS:refId="Package\SQL Truncate Region Revenue" DTS:CreationName="Microsoft.ExecuteSQLTask" DTS:ExecutableType="Microsoft.ExecuteSQLTask" DTS:ObjectName="SQL Truncate Region Revenue" DTS:Description="Execute SQL Task">
+      <DTS:ObjectData>
+        <SQLTask:SqlTaskData SQLTask:Connection="Package.ConnectionManagers[SalesDW]" SQLTask:SqlStatementSource="TRUNCATE TABLE dbo.region_revenue" xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask" />
+      </DTS:ObjectData>
+    </DTS:Executable>
+    <DTS:Executable DTS:refId="Package\DFT Load Region Revenue" DTS:CreationName="Microsoft.Pipeline" DTS:ExecutableType="Microsoft.Pipeline" DTS:ObjectName="DFT Load Region Revenue" DTS:Description="Data Flow Task">
+      <DTS:ObjectData>
+    <pipeline version="1">
+      <components>
+        <component refId="Package\DFT Load Region Revenue\SRC Orders" componentClassID="Microsoft.OLEDBSource" name="SRC Orders" version="1">
+          <properties>
+            <property dataType="System.String" name="SqlCommand">SELECT o.order_id, o.customer_id, o.order_date, o.status, o.amount
+FROM dbo.orders AS o</property>
+            <property dataType="System.Int32" name="AccessMode">2</property>
+            <property dataType="System.String" name="OpenRowset"></property>
+          </properties>
+          <connections>
+            <connection refId="Package\DFT Load Region Revenue\SRC Orders.Connections[OleDbConnection]" connectionManagerID="Package.ConnectionManagers[SalesDW]" connectionManagerRefId="Package.ConnectionManagers[SalesDW]" name="OleDbConnection" />
+          </connections>
+          <outputs>
+            <output refId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output]" name="OLE DB Source Output">
+              <outputColumns>
+                <outputColumn refId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[order_id]" dataType="i4" lineageId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[order_id]" name="order_id" />
+                <outputColumn refId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[customer_id]" dataType="i4" lineageId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[customer_id]" name="customer_id" />
+                <outputColumn refId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[order_date]" dataType="dbDate" lineageId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[order_date]" name="order_date" />
+                <outputColumn refId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[status]" dataType="wstr" length="20" lineageId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[status]" name="status" />
+                <outputColumn refId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[amount]" dataType="numeric" precision="10" scale="2" lineageId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[amount]" name="amount" />
+              </outputColumns>
+            </output>
+            <output refId="Package\DFT Load Region Revenue\SRC Orders.Outputs[SRC Orders Error Output]" name="SRC Orders Error Output" isErrorOut="true" />
+          </outputs>
+        </component>
+        <component refId="Package\DFT Load Region Revenue\SRC Customers" componentClassID="Microsoft.OLEDBSource" name="SRC Customers" version="1">
+          <properties>
+            <property dataType="System.String" name="SqlCommand"></property>
+            <property dataType="System.Int32" name="AccessMode">0</property>
+            <property dataType="System.String" name="OpenRowset">[dbo].[customers]</property>
+          </properties>
+          <connections>
+            <connection refId="Package\DFT Load Region Revenue\SRC Customers.Connections[OleDbConnection]" connectionManagerID="Package.ConnectionManagers[SalesDW]" connectionManagerRefId="Package.ConnectionManagers[SalesDW]" name="OleDbConnection" />
+          </connections>
+          <outputs>
+            <output refId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output]" name="OLE DB Source Output">
+              <outputColumns>
+                <outputColumn refId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[id]" dataType="i4" lineageId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[id]" name="id" />
+                <outputColumn refId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[first_name]" dataType="wstr" length="50" lineageId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[first_name]" name="first_name" />
+                <outputColumn refId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[last_name]" dataType="wstr" length="50" lineageId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[last_name]" name="last_name" />
+                <outputColumn refId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[email]" dataType="wstr" length="100" lineageId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[email]" name="email" />
+                <outputColumn refId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[region]" dataType="wstr" length="20" lineageId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[region]" name="region" />
+              </outputColumns>
+            </output>
+            <output refId="Package\DFT Load Region Revenue\SRC Customers.Outputs[SRC Customers Error Output]" name="SRC Customers Error Output" isErrorOut="true" />
+          </outputs>
+        </component>
+        <component refId="Package\DFT Load Region Revenue\CSPL Status" componentClassID="Microsoft.ConditionalSplit" name="CSPL Status" version="1">
+          <inputs>
+            <input refId="Package\DFT Load Region Revenue\CSPL Status.Inputs[Conditional Split Input]" name="Conditional Split Input">
+              <inputColumns>
+                <inputColumn refId="Package\DFT Load Region Revenue\CSPL Status.Inputs[Conditional Split Input].Columns[status]" cachedName="status" lineageId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[status]" usageType="readOnly" />
+              </inputColumns>
+            </input>
+          </inputs>
+          <outputs>
+            <output refId="Package\DFT Load Region Revenue\CSPL Status.Outputs[Shipped]" name="Shipped">
+              <properties>
+                <property dataType="System.Int32" name="EvaluationOrder">0</property>
+                <property dataType="System.String" name="FriendlyExpression">status == "shipped"</property>
+                <property dataType="System.String" name="Expression">#{Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[status]} == "shipped"</property>
+                <property dataType="System.Boolean" name="IsDefaultOut">false</property>
+              </properties>
+            </output>
+            <output refId="Package\DFT Load Region Revenue\CSPL Status.Outputs[Cancelled]" name="Cancelled">
+              <properties>
+                <property dataType="System.Int32" name="EvaluationOrder">1</property>
+                <property dataType="System.String" name="FriendlyExpression">LOWER(status) == "cancelled"</property>
+                <property dataType="System.String" name="Expression">LOWER(#{Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[status]}) == "cancelled"</property>
+                <property dataType="System.Boolean" name="IsDefaultOut">false</property>
+              </properties>
+            </output>
+            <output refId="Package\DFT Load Region Revenue\CSPL Status.Outputs[Other Statuses]" name="Other Statuses">
+              <properties>
+                <property dataType="System.Boolean" name="IsDefaultOut">true</property>
+              </properties>
+            </output>
+          </outputs>
+        </component>
+        <component refId="Package\DFT Load Region Revenue\DER Order Amounts" componentClassID="Microsoft.DerivedColumn" name="DER Order Amounts" version="1">
+          <inputs>
+            <input refId="Package\DFT Load Region Revenue\DER Order Amounts.Inputs[Derived Column Input]" name="Derived Column Input">
+              <inputColumns>
+                <inputColumn refId="Package\DFT Load Region Revenue\DER Order Amounts.Inputs[Derived Column Input].Columns[amount]" cachedName="amount" lineageId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[amount]" usageType="readOnly" />
+              </inputColumns>
+            </input>
+          </inputs>
+          <outputs>
+            <output refId="Package\DFT Load Region Revenue\DER Order Amounts.Outputs[Derived Column Output]" name="Derived Column Output">
+              <outputColumns>
+                <outputColumn refId="Package\DFT Load Region Revenue\DER Order Amounts.Outputs[Derived Column Output].Columns[amount_usd]" dataType="numeric" precision="12" scale="2" lineageId="Package\DFT Load Region Revenue\DER Order Amounts.Outputs[Derived Column Output].Columns[amount_usd]" name="amount_usd">
+                  <properties>
+                    <property dataType="System.String" name="Expression">ROUND(#{Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[amount]} * @[User::FxRate], 2)</property>
+                    <property dataType="System.String" name="FriendlyExpression">ROUND(amount * @[User::FxRate], 2)</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\DER Order Amounts.Outputs[Derived Column Output].Columns[is_large]" dataType="i4" lineageId="Package\DFT Load Region Revenue\DER Order Amounts.Outputs[Derived Column Output].Columns[is_large]" name="is_large">
+                  <properties>
+                    <property dataType="System.String" name="Expression">#{Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[amount]} &gt;= 100 ? 1 : 0</property>
+                    <property dataType="System.String" name="FriendlyExpression">amount &gt;= 100 ? 1 : 0</property>
+                  </properties>
+                </outputColumn>
+              </outputColumns>
+            </output>
+            <output refId="Package\DFT Load Region Revenue\DER Order Amounts.Outputs[DER Order Amounts Error Output]" name="DER Order Amounts Error Output" isErrorOut="true" />
+          </outputs>
+        </component>
+        <component refId="Package\DFT Load Region Revenue\DER Clean Customer" componentClassID="Microsoft.DerivedColumn" name="DER Clean Customer" version="1">
+          <inputs>
+            <input refId="Package\DFT Load Region Revenue\DER Clean Customer.Inputs[Derived Column Input]" name="Derived Column Input">
+              <inputColumns>
+                <inputColumn refId="Package\DFT Load Region Revenue\DER Clean Customer.Inputs[Derived Column Input].Columns[region]" cachedName="region" lineageId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[region]" usageType="readWrite">
+                  <properties>
+                    <property dataType="System.String" name="Expression">UPPER(TRIM(REPLACENULL(#{Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[region]}, "UNKNOWN")))</property>
+                    <property dataType="System.String" name="FriendlyExpression">UPPER(TRIM(REPLACENULL(region, "UNKNOWN")))</property>
+                  </properties>
+                </inputColumn>
+                <inputColumn refId="Package\DFT Load Region Revenue\DER Clean Customer.Inputs[Derived Column Input].Columns[first_name]" cachedName="first_name" lineageId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[first_name]" usageType="readOnly" />
+                <inputColumn refId="Package\DFT Load Region Revenue\DER Clean Customer.Inputs[Derived Column Input].Columns[last_name]" cachedName="last_name" lineageId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[last_name]" usageType="readOnly" />
+              </inputColumns>
+            </input>
+          </inputs>
+          <outputs>
+            <output refId="Package\DFT Load Region Revenue\DER Clean Customer.Outputs[Derived Column Output]" name="Derived Column Output">
+              <outputColumns>
+                <outputColumn refId="Package\DFT Load Region Revenue\DER Clean Customer.Outputs[Derived Column Output].Columns[full_name]" dataType="wstr" length="100" lineageId="Package\DFT Load Region Revenue\DER Clean Customer.Outputs[Derived Column Output].Columns[full_name]" name="full_name">
+                  <properties>
+                    <property dataType="System.String" name="Expression">TRIM(first_name) + " " + TRIM(last_name)</property>
+                    <property dataType="System.String" name="FriendlyExpression">TRIM(first_name) + " " + TRIM(last_name)</property>
+                  </properties>
+                </outputColumn>
+              </outputColumns>
+            </output>
+            <output refId="Package\DFT Load Region Revenue\DER Clean Customer.Outputs[DER Clean Customer Error Output]" name="DER Clean Customer Error Output" isErrorOut="true" />
+          </outputs>
+        </component>
+        <component refId="Package\DFT Load Region Revenue\SRT Orders" componentClassID="Microsoft.Sort" name="SRT Orders" version="1">
+          <properties>
+            <property dataType="System.Boolean" name="EliminateDuplicates">false</property>
+          </properties>
+          <inputs>
+            <input refId="Package\DFT Load Region Revenue\SRT Orders.Inputs[Sort Input]" name="Sort Input">
+              <inputColumns>
+                <inputColumn refId="Package\DFT Load Region Revenue\SRT Orders.Inputs[Sort Input].Columns[order_id]" cachedName="order_id" lineageId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[order_id]" usageType="readOnly">
+                  <properties>
+                    <property dataType="System.Int32" name="NewSortKeyPosition">0</property>
+                  </properties>
+                </inputColumn>
+                <inputColumn refId="Package\DFT Load Region Revenue\SRT Orders.Inputs[Sort Input].Columns[customer_id]" cachedName="customer_id" lineageId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[customer_id]" usageType="readOnly">
+                  <properties>
+                    <property dataType="System.Int32" name="NewSortKeyPosition">1</property>
+                  </properties>
+                </inputColumn>
+                <inputColumn refId="Package\DFT Load Region Revenue\SRT Orders.Inputs[Sort Input].Columns[amount]" cachedName="amount" lineageId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[amount]" usageType="readOnly">
+                  <properties>
+                    <property dataType="System.Int32" name="NewSortKeyPosition">0</property>
+                  </properties>
+                </inputColumn>
+                <inputColumn refId="Package\DFT Load Region Revenue\SRT Orders.Inputs[Sort Input].Columns[amount_usd]" cachedName="amount_usd" lineageId="Package\DFT Load Region Revenue\DER Order Amounts.Outputs[Derived Column Output].Columns[amount_usd]" usageType="readOnly">
+                  <properties>
+                    <property dataType="System.Int32" name="NewSortKeyPosition">0</property>
+                  </properties>
+                </inputColumn>
+                <inputColumn refId="Package\DFT Load Region Revenue\SRT Orders.Inputs[Sort Input].Columns[is_large]" cachedName="is_large" lineageId="Package\DFT Load Region Revenue\DER Order Amounts.Outputs[Derived Column Output].Columns[is_large]" usageType="readOnly">
+                  <properties>
+                    <property dataType="System.Int32" name="NewSortKeyPosition">0</property>
+                  </properties>
+                </inputColumn>
+              </inputColumns>
+            </input>
+          </inputs>
+          <outputs>
+            <output refId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output]" name="Sort Output">
+              <outputColumns>
+                <outputColumn refId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output].Columns[order_id]" dataType="i4" lineageId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output].Columns[order_id]" name="order_id" sortKeyPosition="0">
+                  <properties>
+                    <property dataType="System.String" name="SortColumnId">#{Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[order_id]}</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output].Columns[customer_id]" dataType="i4" lineageId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output].Columns[customer_id]" name="customer_id" sortKeyPosition="1">
+                  <properties>
+                    <property dataType="System.String" name="SortColumnId">#{Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[customer_id]}</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output].Columns[amount]" dataType="numeric" precision="10" scale="2" lineageId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output].Columns[amount]" name="amount" sortKeyPosition="0">
+                  <properties>
+                    <property dataType="System.String" name="SortColumnId">#{Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[amount]}</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output].Columns[amount_usd]" dataType="numeric" precision="12" scale="2" lineageId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output].Columns[amount_usd]" name="amount_usd" sortKeyPosition="0">
+                  <properties>
+                    <property dataType="System.String" name="SortColumnId">#{Package\DFT Load Region Revenue\DER Order Amounts.Outputs[Derived Column Output].Columns[amount_usd]}</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output].Columns[is_large]" dataType="i4" lineageId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output].Columns[is_large]" name="is_large" sortKeyPosition="0">
+                  <properties>
+                    <property dataType="System.String" name="SortColumnId">#{Package\DFT Load Region Revenue\DER Order Amounts.Outputs[Derived Column Output].Columns[is_large]}</property>
+                  </properties>
+                </outputColumn>
+              </outputColumns>
+            </output>
+          </outputs>
+        </component>
+        <component refId="Package\DFT Load Region Revenue\SRT Customers" componentClassID="Microsoft.Sort" name="SRT Customers" version="1">
+          <properties>
+            <property dataType="System.Boolean" name="EliminateDuplicates">false</property>
+          </properties>
+          <inputs>
+            <input refId="Package\DFT Load Region Revenue\SRT Customers.Inputs[Sort Input]" name="Sort Input">
+              <inputColumns>
+                <inputColumn refId="Package\DFT Load Region Revenue\SRT Customers.Inputs[Sort Input].Columns[id]" cachedName="id" lineageId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[id]" usageType="readOnly">
+                  <properties>
+                    <property dataType="System.Int32" name="NewSortKeyPosition">1</property>
+                  </properties>
+                </inputColumn>
+                <inputColumn refId="Package\DFT Load Region Revenue\SRT Customers.Inputs[Sort Input].Columns[region]" cachedName="region" lineageId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[region]" usageType="readOnly">
+                  <properties>
+                    <property dataType="System.Int32" name="NewSortKeyPosition">0</property>
+                  </properties>
+                </inputColumn>
+                <inputColumn refId="Package\DFT Load Region Revenue\SRT Customers.Inputs[Sort Input].Columns[full_name]" cachedName="full_name" lineageId="Package\DFT Load Region Revenue\DER Clean Customer.Outputs[Derived Column Output].Columns[full_name]" usageType="readOnly">
+                  <properties>
+                    <property dataType="System.Int32" name="NewSortKeyPosition">0</property>
+                  </properties>
+                </inputColumn>
+              </inputColumns>
+            </input>
+          </inputs>
+          <outputs>
+            <output refId="Package\DFT Load Region Revenue\SRT Customers.Outputs[Sort Output]" name="Sort Output">
+              <outputColumns>
+                <outputColumn refId="Package\DFT Load Region Revenue\SRT Customers.Outputs[Sort Output].Columns[id]" dataType="i4" lineageId="Package\DFT Load Region Revenue\SRT Customers.Outputs[Sort Output].Columns[id]" name="id" sortKeyPosition="1">
+                  <properties>
+                    <property dataType="System.String" name="SortColumnId">#{Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[id]}</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\SRT Customers.Outputs[Sort Output].Columns[region]" dataType="wstr" length="20" lineageId="Package\DFT Load Region Revenue\SRT Customers.Outputs[Sort Output].Columns[region]" name="region" sortKeyPosition="0">
+                  <properties>
+                    <property dataType="System.String" name="SortColumnId">#{Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output].Columns[region]}</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\SRT Customers.Outputs[Sort Output].Columns[full_name]" dataType="wstr" length="100" lineageId="Package\DFT Load Region Revenue\SRT Customers.Outputs[Sort Output].Columns[full_name]" name="full_name" sortKeyPosition="0">
+                  <properties>
+                    <property dataType="System.String" name="SortColumnId">#{Package\DFT Load Region Revenue\DER Clean Customer.Outputs[Derived Column Output].Columns[full_name]}</property>
+                  </properties>
+                </outputColumn>
+              </outputColumns>
+            </output>
+          </outputs>
+        </component>
+        <component refId="Package\DFT Load Region Revenue\MJ Orders Customers" componentClassID="Microsoft.MergeJoin" name="MJ Orders Customers" version="1">
+          <properties>
+            <property dataType="System.Int32" name="JoinType">2</property>
+            <property dataType="System.Int32" name="NumKeyColumns">1</property>
+            <property dataType="System.Boolean" name="TreatNullsAsEqual">true</property>
+          </properties>
+          <inputs>
+            <input refId="Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Left Input]" name="Merge Join Left Input">
+              <inputColumns>
+                <inputColumn refId="Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Left Input].Columns[order_id]" cachedName="order_id" lineageId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output].Columns[order_id]" usageType="readOnly" />
+                <inputColumn refId="Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Left Input].Columns[customer_id]" cachedName="customer_id" lineageId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output].Columns[customer_id]" usageType="readOnly" />
+                <inputColumn refId="Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Left Input].Columns[amount]" cachedName="amount" lineageId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output].Columns[amount]" usageType="readOnly" />
+                <inputColumn refId="Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Left Input].Columns[amount_usd]" cachedName="amount_usd" lineageId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output].Columns[amount_usd]" usageType="readOnly" />
+                <inputColumn refId="Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Left Input].Columns[is_large]" cachedName="is_large" lineageId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output].Columns[is_large]" usageType="readOnly" />
+              </inputColumns>
+            </input>
+            <input refId="Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Right Input]" name="Merge Join Right Input">
+              <inputColumns>
+                <inputColumn refId="Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Right Input].Columns[id]" cachedName="id" lineageId="Package\DFT Load Region Revenue\SRT Customers.Outputs[Sort Output].Columns[id]" usageType="readOnly" />
+                <inputColumn refId="Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Right Input].Columns[region]" cachedName="region" lineageId="Package\DFT Load Region Revenue\SRT Customers.Outputs[Sort Output].Columns[region]" usageType="readOnly" />
+                <inputColumn refId="Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Right Input].Columns[full_name]" cachedName="full_name" lineageId="Package\DFT Load Region Revenue\SRT Customers.Outputs[Sort Output].Columns[full_name]" usageType="readOnly" />
+              </inputColumns>
+            </input>
+          </inputs>
+          <outputs>
+            <output refId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output]" name="Merge Join Output">
+              <outputColumns>
+                <outputColumn refId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[order_id]" dataType="i4" lineageId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[order_id]" name="order_id">
+                  <properties>
+                    <property dataType="System.String" name="InputColumnID">#{Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Left Input].Columns[order_id]}</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[amount]" dataType="numeric" precision="10" scale="2" lineageId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[amount]" name="amount">
+                  <properties>
+                    <property dataType="System.String" name="InputColumnID">#{Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Left Input].Columns[amount]}</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[amount_usd]" dataType="numeric" precision="12" scale="2" lineageId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[amount_usd]" name="amount_usd">
+                  <properties>
+                    <property dataType="System.String" name="InputColumnID">#{Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Left Input].Columns[amount_usd]}</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[is_large]" dataType="i4" lineageId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[is_large]" name="is_large">
+                  <properties>
+                    <property dataType="System.String" name="InputColumnID">#{Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Left Input].Columns[is_large]}</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[region]" dataType="wstr" length="20" lineageId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[region]" name="region">
+                  <properties>
+                    <property dataType="System.String" name="InputColumnID">#{Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Right Input].Columns[region]}</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[full_name]" dataType="wstr" length="100" lineageId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[full_name]" name="full_name">
+                  <properties>
+                    <property dataType="System.String" name="InputColumnID">#{Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Right Input].Columns[full_name]}</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[customer_id]" dataType="i4" lineageId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[customer_id]" name="customer_id">
+                  <properties>
+                    <property dataType="System.String" name="InputColumnID">#{Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Left Input].Columns[customer_id]}</property>
+                  </properties>
+                </outputColumn>
+              </outputColumns>
+            </output>
+          </outputs>
+        </component>
+        <component refId="Package\DFT Load Region Revenue\LKP Region Manager" componentClassID="Microsoft.Lookup" name="LKP Region Manager" version="1">
+          <properties>
+            <property dataType="System.String" name="SqlCommand">SELECT region, manager FROM dbo.regions</property>
+            <property dataType="System.Int32" name="CacheType">0</property>
+            <property dataType="System.Int32" name="NoMatchBehavior">0</property>
+          </properties>
+          <connections>
+            <connection refId="Package\DFT Load Region Revenue\LKP Region Manager.Connections[OleDbConnection]" connectionManagerID="Package.ConnectionManagers[SalesDW]" connectionManagerRefId="Package.ConnectionManagers[SalesDW]" name="OleDbConnection" />
+          </connections>
+          <inputs>
+            <input refId="Package\DFT Load Region Revenue\LKP Region Manager.Inputs[Lookup Input]" name="Lookup Input" errorRowDisposition="IgnoreFailure">
+              <inputColumns>
+                <inputColumn refId="Package\DFT Load Region Revenue\LKP Region Manager.Inputs[Lookup Input].Columns[region]" cachedName="region" lineageId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[region]" usageType="readOnly">
+                  <properties>
+                    <property dataType="System.String" name="JoinToReferenceColumn">region</property>
+                  </properties>
+                </inputColumn>
+              </inputColumns>
+            </input>
+          </inputs>
+          <outputs>
+            <output refId="Package\DFT Load Region Revenue\LKP Region Manager.Outputs[Lookup Match Output]" name="Lookup Match Output">
+              <outputColumns>
+                <outputColumn refId="Package\DFT Load Region Revenue\LKP Region Manager.Outputs[Lookup Match Output].Columns[manager]" dataType="wstr" length="50" lineageId="Package\DFT Load Region Revenue\LKP Region Manager.Outputs[Lookup Match Output].Columns[manager]" name="manager">
+                  <properties>
+                    <property dataType="System.String" name="CopyFromReferenceColumn">manager</property>
+                  </properties>
+                </outputColumn>
+              </outputColumns>
+            </output>
+            <output refId="Package\DFT Load Region Revenue\LKP Region Manager.Outputs[Lookup No Match Output]" name="Lookup No Match Output" />
+            <output refId="Package\DFT Load Region Revenue\LKP Region Manager.Outputs[LKP Region Manager Error Output]" name="LKP Region Manager Error Output" isErrorOut="true" />
+          </outputs>
+        </component>
+        <component refId="Package\DFT Load Region Revenue\AGG Region" componentClassID="Microsoft.Aggregate" name="AGG Region" version="1">
+          <inputs>
+            <input refId="Package\DFT Load Region Revenue\AGG Region.Inputs[Aggregate Input]" name="Aggregate Input">
+              <inputColumns>
+                <inputColumn refId="Package\DFT Load Region Revenue\AGG Region.Inputs[Aggregate Input].Columns[region]" cachedName="region" lineageId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[region]" usageType="readOnly" />
+                <inputColumn refId="Package\DFT Load Region Revenue\AGG Region.Inputs[Aggregate Input].Columns[manager]" cachedName="manager" lineageId="Package\DFT Load Region Revenue\LKP Region Manager.Outputs[Lookup Match Output].Columns[manager]" usageType="readOnly" />
+                <inputColumn refId="Package\DFT Load Region Revenue\AGG Region.Inputs[Aggregate Input].Columns[amount_usd]" cachedName="amount_usd" lineageId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[amount_usd]" usageType="readOnly" />
+                <inputColumn refId="Package\DFT Load Region Revenue\AGG Region.Inputs[Aggregate Input].Columns[is_large]" cachedName="is_large" lineageId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[is_large]" usageType="readOnly" />
+              </inputColumns>
+            </input>
+          </inputs>
+          <outputs>
+            <output refId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output]" name="Aggregate Output">
+              <outputColumns>
+                <outputColumn refId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output].Columns[region]" dataType="wstr" length="20" lineageId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output].Columns[region]" name="region">
+                  <properties>
+                    <property dataType="System.Int32" name="AggregationType">0</property>
+                    <property dataType="System.String" name="AggregationColumnId">#{Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[region]}</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output].Columns[manager]" dataType="wstr" length="50" lineageId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output].Columns[manager]" name="manager">
+                  <properties>
+                    <property dataType="System.Int32" name="AggregationType">0</property>
+                    <property dataType="System.String" name="AggregationColumnId">#{Package\DFT Load Region Revenue\LKP Region Manager.Outputs[Lookup Match Output].Columns[manager]}</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output].Columns[revenue]" dataType="numeric" precision="12" scale="2" lineageId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output].Columns[revenue]" name="revenue">
+                  <properties>
+                    <property dataType="System.Int32" name="AggregationType">4</property>
+                    <property dataType="System.String" name="AggregationColumnId">#{Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[amount_usd]}</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output].Columns[order_count]" dataType="i4" lineageId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output].Columns[order_count]" name="order_count">
+                  <properties>
+                    <property dataType="System.Int32" name="AggregationType">2</property>
+                  </properties>
+                </outputColumn>
+                <outputColumn refId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output].Columns[large_orders]" dataType="i4" lineageId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output].Columns[large_orders]" name="large_orders">
+                  <properties>
+                    <property dataType="System.Int32" name="AggregationType">4</property>
+                    <property dataType="System.String" name="AggregationColumnId">#{Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output].Columns[is_large]}</property>
+                  </properties>
+                </outputColumn>
+              </outputColumns>
+            </output>
+          </outputs>
+        </component>
+        <component refId="Package\DFT Load Region Revenue\DST Region Revenue" componentClassID="Microsoft.OLEDBDestination" name="DST Region Revenue" version="1">
+          <properties>
+            <property dataType="System.String" name="OpenRowset">[dbo].[region_revenue]</property>
+            <property dataType="System.Int32" name="AccessMode">3</property>
+            <property dataType="System.String" name="FastLoadOptions">TABLOCK,CHECK_CONSTRAINTS</property>
+          </properties>
+          <connections>
+            <connection refId="Package\DFT Load Region Revenue\DST Region Revenue.Connections[OleDbConnection]" connectionManagerID="Package.ConnectionManagers[SalesDW]" connectionManagerRefId="Package.ConnectionManagers[SalesDW]" name="OleDbConnection" />
+          </connections>
+          <inputs>
+            <input refId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input]" name="OLE DB Destination Input">
+              <inputColumns>
+                <inputColumn refId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input].Columns[region]" cachedName="region" lineageId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output].Columns[region]" usageType="readOnly" externalMetadataColumnId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input].ExternalColumns[region]" />
+                <inputColumn refId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input].Columns[manager]" cachedName="manager" lineageId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output].Columns[manager]" usageType="readOnly" externalMetadataColumnId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input].ExternalColumns[manager]" />
+                <inputColumn refId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input].Columns[revenue]" cachedName="revenue" lineageId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output].Columns[revenue]" usageType="readOnly" externalMetadataColumnId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input].ExternalColumns[revenue]" />
+                <inputColumn refId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input].Columns[order_count]" cachedName="order_count" lineageId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output].Columns[order_count]" usageType="readOnly" externalMetadataColumnId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input].ExternalColumns[order_count]" />
+                <inputColumn refId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input].Columns[large_orders]" cachedName="large_orders" lineageId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output].Columns[large_orders]" usageType="readOnly" externalMetadataColumnId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input].ExternalColumns[large_orders]" />
+              </inputColumns>
+              <externalMetadataColumns isUsed="True">
+                  <externalMetadataColumn refId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input].ExternalColumns[region]" dataType="wstr" length="20" name="region" />
+                  <externalMetadataColumn refId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input].ExternalColumns[manager]" dataType="wstr" length="50" name="manager" />
+                  <externalMetadataColumn refId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input].ExternalColumns[revenue]" dataType="numeric" precision="12" scale="2" name="revenue" />
+                  <externalMetadataColumn refId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input].ExternalColumns[order_count]" dataType="i4" name="order_count" />
+                  <externalMetadataColumn refId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input].ExternalColumns[large_orders]" dataType="i4" name="large_orders" />
+              </externalMetadataColumns>
+            </input>
+          </inputs>
+          <outputs>
+            <output refId="Package\DFT Load Region Revenue\DST Region Revenue.Outputs[DST Region Revenue Error Output]" name="DST Region Revenue Error Output" isErrorOut="true" />
+          </outputs>
+        </component>
+        <component refId="Package\DFT Load Region Revenue\CNT Cancelled" componentClassID="Microsoft.RowCount" name="CNT Cancelled" version="1">
+          <properties>
+            <property dataType="System.String" name="VariableName">User::CancelledCount</property>
+          </properties>
+          <inputs>
+            <input refId="Package\DFT Load Region Revenue\CNT Cancelled.Inputs[Row Count Input]" name="Row Count Input" />
+          </inputs>
+          <outputs>
+            <output refId="Package\DFT Load Region Revenue\CNT Cancelled.Outputs[Row Count Output]" name="Row Count Output" />
+          </outputs>
+        </component>
+        <component refId="Package\DFT Load Region Revenue\DST Cancelled Orders" componentClassID="Microsoft.OLEDBDestination" name="DST Cancelled Orders" version="1">
+          <properties>
+            <property dataType="System.String" name="OpenRowset">[dbo].[cancelled_orders]</property>
+            <property dataType="System.Int32" name="AccessMode">3</property>
+            <property dataType="System.String" name="FastLoadOptions">TABLOCK,CHECK_CONSTRAINTS</property>
+          </properties>
+          <connections>
+            <connection refId="Package\DFT Load Region Revenue\DST Cancelled Orders.Connections[OleDbConnection]" connectionManagerID="Package.ConnectionManagers[SalesDW]" connectionManagerRefId="Package.ConnectionManagers[SalesDW]" name="OleDbConnection" />
+          </connections>
+          <inputs>
+            <input refId="Package\DFT Load Region Revenue\DST Cancelled Orders.Inputs[OLE DB Destination Input]" name="OLE DB Destination Input">
+              <inputColumns>
+                <inputColumn refId="Package\DFT Load Region Revenue\DST Cancelled Orders.Inputs[OLE DB Destination Input].Columns[order_id]" cachedName="order_id" lineageId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[order_id]" usageType="readOnly" externalMetadataColumnId="Package\DFT Load Region Revenue\DST Cancelled Orders.Inputs[OLE DB Destination Input].ExternalColumns[order_id]" />
+                <inputColumn refId="Package\DFT Load Region Revenue\DST Cancelled Orders.Inputs[OLE DB Destination Input].Columns[customer_id]" cachedName="customer_id" lineageId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[customer_id]" usageType="readOnly" externalMetadataColumnId="Package\DFT Load Region Revenue\DST Cancelled Orders.Inputs[OLE DB Destination Input].ExternalColumns[customer_id]" />
+                <inputColumn refId="Package\DFT Load Region Revenue\DST Cancelled Orders.Inputs[OLE DB Destination Input].Columns[amount]" cachedName="amount" lineageId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output].Columns[amount]" usageType="readOnly" externalMetadataColumnId="Package\DFT Load Region Revenue\DST Cancelled Orders.Inputs[OLE DB Destination Input].ExternalColumns[amount]" />
+              </inputColumns>
+              <externalMetadataColumns isUsed="True">
+                  <externalMetadataColumn refId="Package\DFT Load Region Revenue\DST Cancelled Orders.Inputs[OLE DB Destination Input].ExternalColumns[order_id]" dataType="i4" name="order_id" />
+                  <externalMetadataColumn refId="Package\DFT Load Region Revenue\DST Cancelled Orders.Inputs[OLE DB Destination Input].ExternalColumns[customer_id]" dataType="i4" name="customer_id" />
+                  <externalMetadataColumn refId="Package\DFT Load Region Revenue\DST Cancelled Orders.Inputs[OLE DB Destination Input].ExternalColumns[amount]" dataType="numeric" precision="10" scale="2" name="amount" />
+              </externalMetadataColumns>
+            </input>
+          </inputs>
+          <outputs>
+            <output refId="Package\DFT Load Region Revenue\DST Cancelled Orders.Outputs[DST Cancelled Orders Error Output]" name="DST Cancelled Orders Error Output" isErrorOut="true" />
+          </outputs>
+        </component>
+      </components>
+      <paths>
+        <path refId="Package\DFT Load Region Revenue.Paths[Orders]" endId="Package\DFT Load Region Revenue\CSPL Status.Inputs[Conditional Split Input]" name="Orders" startId="Package\DFT Load Region Revenue\SRC Orders.Outputs[OLE DB Source Output]" />
+        <path refId="Package\DFT Load Region Revenue.Paths[Shipped]" endId="Package\DFT Load Region Revenue\DER Order Amounts.Inputs[Derived Column Input]" name="Shipped" startId="Package\DFT Load Region Revenue\CSPL Status.Outputs[Shipped]" />
+        <path refId="Package\DFT Load Region Revenue.Paths[Customers]" endId="Package\DFT Load Region Revenue\DER Clean Customer.Inputs[Derived Column Input]" name="Customers" startId="Package\DFT Load Region Revenue\SRC Customers.Outputs[OLE DB Source Output]" />
+        <path refId="Package\DFT Load Region Revenue.Paths[Order Amounts]" endId="Package\DFT Load Region Revenue\SRT Orders.Inputs[Sort Input]" name="Order Amounts" startId="Package\DFT Load Region Revenue\DER Order Amounts.Outputs[Derived Column Output]" />
+        <path refId="Package\DFT Load Region Revenue.Paths[Clean Customers]" endId="Package\DFT Load Region Revenue\SRT Customers.Inputs[Sort Input]" name="Clean Customers" startId="Package\DFT Load Region Revenue\DER Clean Customer.Outputs[Derived Column Output]" />
+        <path refId="Package\DFT Load Region Revenue.Paths[Sorted Orders]" endId="Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Left Input]" name="Sorted Orders" startId="Package\DFT Load Region Revenue\SRT Orders.Outputs[Sort Output]" />
+        <path refId="Package\DFT Load Region Revenue.Paths[Sorted Customers]" endId="Package\DFT Load Region Revenue\MJ Orders Customers.Inputs[Merge Join Right Input]" name="Sorted Customers" startId="Package\DFT Load Region Revenue\SRT Customers.Outputs[Sort Output]" />
+        <path refId="Package\DFT Load Region Revenue.Paths[Joined]" endId="Package\DFT Load Region Revenue\LKP Region Manager.Inputs[Lookup Input]" name="Joined" startId="Package\DFT Load Region Revenue\MJ Orders Customers.Outputs[Merge Join Output]" />
+        <path refId="Package\DFT Load Region Revenue.Paths[With Manager]" endId="Package\DFT Load Region Revenue\AGG Region.Inputs[Aggregate Input]" name="With Manager" startId="Package\DFT Load Region Revenue\LKP Region Manager.Outputs[Lookup Match Output]" />
+        <path refId="Package\DFT Load Region Revenue.Paths[Region Totals]" endId="Package\DFT Load Region Revenue\DST Region Revenue.Inputs[OLE DB Destination Input]" name="Region Totals" startId="Package\DFT Load Region Revenue\AGG Region.Outputs[Aggregate Output]" />
+        <path refId="Package\DFT Load Region Revenue.Paths[Cancelled]" endId="Package\DFT Load Region Revenue\CNT Cancelled.Inputs[Row Count Input]" name="Cancelled" startId="Package\DFT Load Region Revenue\CSPL Status.Outputs[Cancelled]" />
+        <path refId="Package\DFT Load Region Revenue.Paths[Counted]" endId="Package\DFT Load Region Revenue\DST Cancelled Orders.Inputs[OLE DB Destination Input]" name="Counted" startId="Package\DFT Load Region Revenue\CNT Cancelled.Outputs[Row Count Output]" />
+      </paths>
+    </pipeline>
+      </DTS:ObjectData>
+    </DTS:Executable>
+    <DTS:Executable DTS:refId="Package\SQL Refresh Stats" DTS:CreationName="Microsoft.ExecuteSQLTask" DTS:ExecutableType="Microsoft.ExecuteSQLTask" DTS:ObjectName="SQL Refresh Stats" DTS:Description="Execute SQL Task">
+      <DTS:ObjectData>
+        <SQLTask:SqlTaskData SQLTask:Connection="Package.ConnectionManagers[SalesDW]" SQLTask:SqlStatementSource="EXEC dbo.usp_refresh_region_stats" xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask" />
+      </DTS:ObjectData>
+    </DTS:Executable>
+    <DTS:Executable DTS:refId="Package\Send Done Mail" DTS:CreationName="Microsoft.SendMailTask" DTS:ExecutableType="Microsoft.SendMailTask" DTS:ObjectName="Send Done Mail" DTS:Description="Send Mail Task" />
+  </DTS:Executables>
+  <DTS:PrecedenceConstraints>
+    <DTS:PrecedenceConstraint DTS:refId="Package.PrecedenceConstraints[C0]" DTS:From="Package\SQL Truncate Region Revenue" DTS:To="Package\DFT Load Region Revenue" DTS:ObjectName="C0" />
+    <DTS:PrecedenceConstraint DTS:refId="Package.PrecedenceConstraints[C1]" DTS:From="Package\DFT Load Region Revenue" DTS:To="Package\SQL Refresh Stats" DTS:ObjectName="C1" />
+    <DTS:PrecedenceConstraint DTS:refId="Package.PrecedenceConstraints[C2]" DTS:From="Package\SQL Refresh Stats" DTS:To="Package\Send Done Mail" DTS:ObjectName="C2" />
+  </DTS:PrecedenceConstraints>
+</DTS:Executable>

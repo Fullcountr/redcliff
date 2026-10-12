@@ -28,6 +28,7 @@ from redcliff.importer import import_sql  # noqa: E402
 from redcliff.lakeflow import compile_lakeflow  # noqa: E402
 from redcliff.powercenter import import_powercenter  # noqa: E402
 from redcliff.spec import Pipeline  # noqa: E402
+from redcliff.ssis import import_ssis  # noqa: E402
 from test_dbt import TABLES, create_tables, norm  # noqa: E402
 
 ROOT = Path(__file__).parents[2]
@@ -51,6 +52,7 @@ PIPELINES = {
     "wf_customer_revenue": lambda: import_powercenter((PC / "wf_customer_revenue.xml").read_text(),
                                                       params=(PC / "wf_customer_revenue.par").read_text()).pipeline,
     "wf_store_mart": lambda: import_powercenter((PC / "wf_store_mart.xml").read_text()).pipeline,
+    "ssis_region_revenue": lambda: import_ssis((ROOT / "examples/legacy/ssis/LoadRegionRevenue.dtsx").read_text()).pipeline,
 }
 
 # Stand-ins for the warehouse tables that table sources read in place.

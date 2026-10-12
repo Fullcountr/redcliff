@@ -53,8 +53,8 @@ DuckDB, compiled to WebAssembly; about 15 MB gzipped, cached after the first vis
 everything runs in the tab and nothing is sent anywhere.
 
 A sample pipeline loads with live row counts. Hover any column. Click one. Then press
-**Import** and pick the legacy Teradata job or the Informatica PowerCenter mapping; both are
-already filled in.
+**Import** and pick the legacy Teradata job, the Informatica PowerCenter mapping or the SSIS
+package; each is already filled in.
 
 **Run it yourself:**
 
@@ -99,10 +99,11 @@ step, with a note. Nothing is dropped silently.
 </td>
 <td width="50%" valign="top">
 
-**Import Informatica PowerCenter mappings.** Source qualifiers, expressions, joiners, lookups,
-routers, aggregators, ranks, normalizers and more become steps, and the Informatica expression language becomes SQL
-that keeps its quirks. A **migration scorecard** grades every transformation: converted, needs
-review, or rewrite by hand, with the reason.
+**Import Informatica PowerCenter and SSIS.** PowerCenter mappings and workflows, and SSIS
+packages, become steps: source qualifiers, expressions, joiners, lookups, routers, ranks,
+conditional splits, merge joins and more, with each expression language translated to SQL that
+keeps its quirks. A **migration scorecard** grades every transformation: converted, needs review,
+or rewrite by hand, with the reason.
 
 </td>
 </tr>
@@ -369,11 +370,21 @@ more) is translated with PowerCenter's semantics where SQL differs. A folder exp
 pipeline, connected through the tables its mappings write and read. The full list is in
 [`docs/powercenter.md`](docs/powercenter.md).
 
+### The SSIS importer
+
+SSIS packages (`.dtsx`, SSIS 2012 or later) import the same way: sources, derived columns, data
+conversions, conditional splits (first true output wins, as in SSIS), sorts, merge joins, lookups,
+union alls, aggregates and destinations become steps; package variables become pipeline variables;
+an Execute SQL task that truncates a table makes its load overwrite; other control-flow tasks are
+graded as orchestration. SSIS expressions keep their semantics, such as `+` concatenating strings
+and integer division. See [`docs/ssis.md`](docs/ssis.md).
+
 ### The command line
 
 | Command | Does |
 | --- | --- |
 | `redcliff import FILE.sql --dialect D [--schema S] -o pipeline.yaml` | SQL to spec |
+| `redcliff import PACKAGE.dtsx [--scorecard report.md] -o pipeline.yaml` | SSIS package to spec, with a scorecard ([details](docs/ssis.md)) |
 | `redcliff import EXPORT.xml [--params FILE.par] [--mapping NAME] [--scorecard report.md] -o pipeline.yaml` | PowerCenter export (mappings, mapplets, sessions, workflows) to spec, with a scorecard |
 | `redcliff validate pipeline.yaml` | structure plus column-level checks |
 | `redcliff compile pipeline.yaml --to spark\|pyspark\|duckdb [--node ID]` | generate code |
@@ -427,7 +438,8 @@ flowchart LR
 | MCP | the protocol over real stdio, every tool, and edits: proposed without writing, applied once, refused when stale or broken, untouched steps kept byte for byte |
 | Importer | the original SQL and the imported, recompiled pipeline must return identical rows |
 | PowerCenter | the sample mapping runs in DuckDB and must match rows worked out by hand; the same job rebuilt with a mapplet, session, workflow and parameter file must return identical rows; a store mart with a Normalizer, two Ranks (a tie, a NULL) and a worklet matches rows worked out by hand; every transformation type and scorecard status has a test |
-| Expressions | each Informatica expression runs in DuckDB and must return PowerCenter's answer |
+| Expressions | each Informatica and SSIS expression runs in DuckDB and must return the original tool's answer |
+| SSIS | the sample package runs in DuckDB, Spark, dbt and Lakeflow and must match rows worked out by hand; each component type, including first-match conditional splits and lookup no-match outputs, has a test |
 | CLI | a legacy Teradata job goes through import, validate, compile, lineage and run |
 | Spark | generated Spark SQL and PySpark run on real Spark and must match DuckDB, row for row; Informatica expressions too |
 | dbt | every example becomes a dbt project, `dbt build` runs it with dbt-duckdb (seeds, hooks, file targets) and every target must match DuckDB |
@@ -445,8 +457,8 @@ imported Teradata job and the imported PowerCenter exports.
 | --- | --- |
 | [`core/`](core) | the Python package: spec, compiler, lineage, row trace, diff, importers, CLI, MCP server, browser bridge |
 | [`web/`](web) | the playground: React, React Flow, Pyodide worker, DuckDB-Wasm |
-| [`examples/`](examples) | sample data, example pipelines, a legacy Teradata job and three PowerCenter exports |
-| [`docs/`](docs) | spec reference, architecture notes, importer guides, outputs, the pull request bot, the MCP server |
+| [`examples/`](examples) | sample data, example pipelines, a legacy Teradata job, three PowerCenter exports and an SSIS package |
+| [`docs/`](docs) | spec reference, architecture notes, importer guides (SQL, PowerCenter, SSIS), outputs, the pull request bot, the MCP server, releasing |
 | [`action.yml`](action.yml) | the pull request bot as a GitHub Action |
 | [`spikes/`](spikes) | small experiments that proved an approach |
 
@@ -458,7 +470,7 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 
 | | Open source | Runs where | Legacy SQL import | Column lineage built in |
 | --- | --- | --- | --- | --- |
-| **Redcliff** | yes, Apache 2.0 | anywhere; generates Spark SQL, PySpark, DuckDB SQL | yes: 11 SQL dialects and Informatica PowerCenter | yes |
+| **Redcliff** | yes, Apache 2.0 | anywhere; generates Spark SQL, PySpark, DuckDB SQL, dbt, Lakeflow | yes: 11 SQL dialects, Informatica PowerCenter and SSIS | yes |
 | Prophecy | no | Spark and SQL platforms | yes, including Ab Initio (paid) | yes |
 | Databricks Lakeflow Designer | no | Databricks | no | through Unity Catalog |
 | dbt Canvas | no | dbt platform, Enterprise plans | no | through dbt |
@@ -489,10 +501,10 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 - [x] Pipeline variables: `${name}` with defaults, `--var` overrides and a Variables bar in the playground; PowerCenter `$$PARAMS` import as variables, dbt gets `var()`
 - [x] Merge targets (`mode: merge` with `keys` and `delete_when`); PowerCenter Update Strategy upserts import as merges
 - [x] Data quality expectations on any step: `redcliff test`, results on the canvas, dbt tests and Lakeflow expectations
+- [x] SSIS package (`.dtsx`) importer, with a scorecard
 
 ### Next
 
-- [ ] SSIS package (`.dtsx`) importer
 - [ ] `pip install redcliff` from PyPI: the release workflow is ready; it needs PyPI trusted publishing set up ([docs/releasing.md](docs/releasing.md))
 - [ ] VS Code extension: the canvas and lineage next to the spec file
 

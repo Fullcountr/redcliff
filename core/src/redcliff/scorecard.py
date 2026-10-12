@@ -1,6 +1,7 @@
 """Migration scorecard: how much of a legacy job Redcliff converted, and what still needs a person.
 
-Each item is one piece of the legacy job (a PowerCenter transformation, or one SQL statement)
+Each item is one piece of the legacy job (a PowerCenter transformation, an SSIS component, or one
+SQL statement)
 with a status:
 
 - ``converted``: the generated pipeline means the same thing.
@@ -44,7 +45,7 @@ class ScoreItem:
 
 @dataclass
 class Scorecard:
-    origin: str                    # "powercenter" or "sql"
+    origin: str                    # "powercenter", "ssis" or "sql"
     title: str
     items: list[ScoreItem] = field(default_factory=list)
     functions: dict[str, int] = field(default_factory=dict)   # legacy function -> times used

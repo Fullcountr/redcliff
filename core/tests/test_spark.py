@@ -35,6 +35,7 @@ from redcliff.importer import import_sql  # noqa: E402
 from redcliff.informatica import translate  # noqa: E402
 from redcliff.powercenter import import_powercenter  # noqa: E402
 from redcliff.spec import Pipeline  # noqa: E402
+from redcliff.ssis import import_ssis  # noqa: E402
 
 ROOT = Path(__file__).parents[2]
 DATA = ROOT / "examples" / "data"
@@ -159,6 +160,8 @@ PIPELINES = {
     "wf_customer_revenue": workflow,  # mapplet, session overrides, parameter file, post-SQL
     "wf_store_mart": lambda: import_powercenter(  # Normalizer, Rank (ties, NULLs), worklet
         (ROOT / "examples" / "legacy" / "powercenter" / "wf_store_mart.xml").read_text()).pipeline,
+    "ssis_region_revenue": lambda: import_ssis(  # conditional split, merge join (null-safe), lookup
+        (ROOT / "examples" / "legacy" / "ssis" / "LoadRegionRevenue.dtsx").read_text()).pipeline,
 }
 
 

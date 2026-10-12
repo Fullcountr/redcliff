@@ -281,6 +281,22 @@ await step("a PowerCenter store mart imports its Normalizer, Ranks and worklet",
   await shot(page, "14-store-mart");
 });
 
+await step("an SSIS package imports with its data flow and control flow", async () => {
+  await page.locator(".topbar").getByRole("button", { name: "Examples" }).click();
+  await page.getByRole("menuitem", { name: /SSIS package/ }).click();
+  await page.waitForSelector("dialog[open]");
+  assert.match(await page.getByLabel("SSIS package").inputValue(), /Microsoft\.ConditionalSplit/);
+  await page.locator("dialog").getByRole("button", { name: "Import", exact: true }).click();
+  await page.waitForSelector("dialog[open]", { state: "detached" });
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="agg_region"] .step-rows')?.textContent === "2 rows", null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="cspl_status_cancelled"] .step-rows')?.textContent === "1 row");
+  await page.getByRole("tab", { name: /Migration/ }).click();
+  const items = await page.locator(".score-item .name").allTextContents();
+  assert.ok(items.includes("MJ Orders Customers") && items.includes("LoadRegionRevenue/Send Done Mail"), items.join(", "));
+  assert.equal(await page.getByLabel("Variable fx_rate").inputValue(), "1.0");
+  await shot(page, "15-ssis");
+});
+
 await step("works on a phone-sized screen and in dark mode", async () => {
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: "dark" });
   const p = await phone.newPage();

@@ -616,7 +616,7 @@ function Ring({ card }: { card: Scorecard }) {
 
 function describe(card: Scorecard, source: string): string {
   const tasks = card.items.filter((i) => i.area === "orchestration").length;
-  const unit = card.origin === "powercenter" ? "instances" : "statements";
+  const unit = card.origin === "powercenter" ? "instances" : card.origin === "ssis" ? "components" : "statements";
   const steps = card.items.length - tasks;
   return tasks
     ? `${steps} ${unit} and ${tasks} workflow ${tasks === 1 ? "task" : "tasks"} from ${source}`
@@ -630,7 +630,7 @@ function MigrationPanel({ scorecard: card, activeItem, onPickItem, onTab, onSele
     .filter((i) => filter === "all" || i.status === filter)
     .sort((a, b) => order[a.status] - order[b.status]);
   const lin = card.lineage;
-  const source = card.origin === "powercenter" ? "Informatica PowerCenter" : "SQL";
+  const source = card.origin === "powercenter" ? "Informatica PowerCenter" : card.origin === "ssis" ? "SSIS" : "SQL";
   const markdown = () => {
     const lines = [`# Migration scorecard: ${card.title}`, "",
       `${card.counts.converted} of ${card.items.length} converted automatically (${Math.round(card.automated * 100)}%), ` +

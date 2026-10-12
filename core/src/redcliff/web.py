@@ -155,6 +155,16 @@ def import_powercenter(xml: str, mapping: Any = None, params: str | None = None)
 
 
 @_wrap
+def import_ssis(xml: str) -> dict[str, Any]:
+    """An SSIS package (.dtsx) in, spec and migration scorecard out."""
+    from redcliff.ssis import import_ssis as _import_ssis
+
+    result = _import_ssis(xml)
+    return {"spec": result.pipeline.to_dict(), "warnings": result.warnings, "outputs": result.outputs,
+            "scorecard": result.scorecard.to_dict()}
+
+
+@_wrap
 def impact(spec: Any, node_id: str, column: str) -> dict[str, Any]:
     """Blast radius of one column."""
     graph = build_graph(_load(spec))

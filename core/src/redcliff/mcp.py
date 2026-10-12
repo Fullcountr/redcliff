@@ -404,10 +404,11 @@ class Server:
             del self.proposals[proposal_id]
             return {"written": prop["spec"]}
 
-        @tool("import_legacy", "Import legacy ETL", "Turn a legacy SQL script or an Informatica PowerCenter XML export "
+        @tool("import_legacy", "Import legacy ETL", "Turn a legacy SQL script, an Informatica PowerCenter XML export "
+              "or an SSIS .dtsx package "
               "into a pipeline, as a proposal for a new spec file (apply it with apply_edit). PowerCenter imports "
               "come with a migration scorecard.",
-              {"source": {**S, "description": "Path of the .sql or .xml file, relative to the root"},
+              {"source": {**S, "description": "Path of the .sql, .xml or .dtsx file, relative to the root"},
                "out": {**S, "description": "Where the new spec goes, e.g. pipelines/orders.yaml"},
                "dialect": {**S, "description": "SQL dialect, e.g. teradata, oracle, tsql"},
                "params": {**S, "description": "PowerCenter parameter file path"}},
@@ -415,7 +416,11 @@ class Server:
         def import_legacy(source, out, dialect=None, params=None):
             src = self.path(source)
             text = src.read_text(encoding="utf-8")
-            if src.suffix.lower() == ".xml" or text.lstrip().startswith("<"):
+            from redcliff.ssis import import_ssis, is_ssis
+
+            if is_ssis(text, src.name):
+                result = import_ssis(text)
+            elif src.suffix.lower() == ".xml" or text.lstrip().startswith("<"):
                 from redcliff.powercenter import import_powercenter
 
                 result = import_powercenter(text, params=self.path(params).read_text(encoding="utf-8") if params else None)

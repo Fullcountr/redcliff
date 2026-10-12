@@ -2,6 +2,7 @@
 
     redcliff import legacy.sql --dialect teradata --schema schema.json -o pipeline.yaml
     redcliff import mapping.xml -o pipeline.yaml --scorecard scorecard.md   (Informatica PowerCenter)
+    redcliff import package.dtsx -o pipeline.yaml --scorecard scorecard.md  (SSIS)
     redcliff validate pipeline.yaml
     redcliff compile pipeline.yaml --to spark
     redcliff compile pipeline.yaml --to dbt -o my_dbt_project       (or --to lakeflow)
@@ -72,7 +73,11 @@ def _err(message: str) -> None:
 
 def cmd_import(args) -> int:
     text_in = Path(args.sql).read_text(encoding="utf-8")
-    if args.sql.lower().endswith(".xml") or text_in.lstrip().startswith("<"):
+    from redcliff.ssis import import_ssis, is_ssis
+
+    if is_ssis(text_in, args.sql):
+        result = import_ssis(text_in, name=args.name)
+    elif args.sql.lower().endswith(".xml") or text_in.lstrip().startswith("<"):
         params = Path(args.params).read_text(encoding="utf-8") if args.params else None
         result = import_powercenter(text_in, mapping=args.mapping or None, name=args.name, params=params)
     else:
@@ -407,8 +412,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"redcliff {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("import", help="turn legacy SQL or a PowerCenter mapping into a pipeline spec")
-    p.add_argument("sql", help="SQL file (one or more statements), or a PowerCenter XML export")
+    p = sub.add_parser("import", help="turn legacy SQL, a PowerCenter export or an SSIS package into a pipeline spec")
+    p.add_argument("sql", help="SQL file (one or more statements), a PowerCenter XML export or an SSIS .dtsx")
     p.add_argument("--dialect", help="sqlglot dialect, e.g. teradata, oracle, tsql, snowflake")
     p.add_argument("--schema", help="JSON/YAML mapping of table -> {column: type}")
     p.add_argument("--name", help="pipeline name (default: the file name)")

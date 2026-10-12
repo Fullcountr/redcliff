@@ -6,6 +6,7 @@ from redcliff.importer import ImportResult, SQLImportError, import_sql
 from redcliff.lineage import Ref, blast_radius, build_graph, column_issues, lineage_report, openlineage_facet
 from redcliff.powercenter import PowerCenterImportError, import_powercenter
 from redcliff.scorecard import Scorecard, ScoreItem
+from redcliff.ssis import SSISImportError, import_ssis
 from redcliff.spec import Issue, Node, Pipeline, SpecError, json_schema, load_spec, parse_spec, validate
 
 __version__ = "0.1.0"
@@ -21,6 +22,8 @@ __all__ = [
     "import_sql",
     "PowerCenterImportError",
     "import_powercenter",
+    "SSISImportError",
+    "import_ssis",
     "Scorecard",
     "ScoreItem",
     "Ref",
