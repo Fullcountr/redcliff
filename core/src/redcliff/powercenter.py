@@ -279,9 +279,12 @@ class _MappingConverter:
             colmap[port] = r.col
         if seqs:
             derive = {}
+            # Spark requires an ordered window, and a fixed order makes the numbers repeatable.
+            order = list(dict.fromkeys(colmap.values())) or list((self.b.cols[base] or [])[:1])
+            over = f"ORDER BY {', '.join(order)}" if order else ""
             for port, s in seqs.items():
                 col = self.fresh(f"{s.inst}_{s.port}", base)
-                n = "ROW_NUMBER() OVER ()"
+                n = f"ROW_NUMBER() OVER ({over})"
                 if s.step != 1:
                     expr = f"{s.start} + ({n} - 1) * {s.step}"
                 elif s.start != 1:

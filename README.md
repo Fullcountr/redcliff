@@ -412,10 +412,13 @@ flowchart LR
 | PowerCenter | the sample mapping runs in DuckDB and must match rows worked out by hand; every transformation type and scorecard status has a test |
 | Expressions | each Informatica expression runs in DuckDB and must return PowerCenter's answer |
 | CLI | a legacy Teradata job goes through import, validate, compile, lineage and run |
+| Spark | generated Spark SQL and PySpark run on real Spark and must match DuckDB, row for row; Informatica expressions too |
 | Browser | headless Chromium drives the real app: boot, hover, blast radius, SQL and PowerCenter import, scorecard, preview, edit, share, phone layout; after every deploy it runs again against the live site |
 
-CI runs all of it, including the browser test, on every push. Spark SQL is checked by parsing
-and PySpark by compiling; running them against a real Spark cluster is on the roadmap.
+CI runs all of it on every push, including the browser test and a real Spark: the generated
+Spark SQL (queries and full scripts that write tables) and PySpark scripts run on a local Spark 4
+with its defaults, ANSI mode included, and must return DuckDB's rows for every example, the
+imported Teradata job and the imported PowerCenter mapping.
 
 ### Repository layout
 
@@ -457,7 +460,7 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 - [x] Browser playground with previews and share links
 - [x] Informatica PowerCenter XML importer, with a migration scorecard
 - [ ] Mapplet expansion and session/workflow import (pre/post SQL, parameter files)
-- [ ] Spark SQL and PySpark run against real Spark in CI
+- [x] Spark SQL and PySpark run against real Spark in CI
 - [ ] Row-level trace: click an output row, see the input rows behind it
 - [ ] MCP server, so AI agents can edit pipelines and show a diff before you accept
 - [ ] Pull request bot: lineage and data diffs posted on every PR
