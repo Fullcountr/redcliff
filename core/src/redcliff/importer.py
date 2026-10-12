@@ -32,6 +32,7 @@ class ImportResult:
     pipeline: Pipeline
     warnings: list[str] = field(default_factory=list)
     outputs: list[str] = field(default_factory=list)  # final node of each statement, in order
+    scorecard: Any = None  # a redcliff.scorecard.Scorecard
 
 
 class _Fallback(Exception):
@@ -526,11 +527,21 @@ def import_sql(
     if not statements:
         raise SQLImportError("no SQL statements found")
 
+    from redcliff.scorecard import ScoreItem  # here to avoid an import cycle
+
     outputs = []
+    items: list[ScoreItem] = []
     for i, stmt in enumerate(statements):
+        nodes_before, warnings_before = len(b.nodes), len(b.warnings)
         out = b.statement(normalize_identifiers(stmt, dialect=dialect), i)
         if out:
             outputs.append(out)
+        item = ScoreItem(f"statement {i + 1}", _statement_kind(stmt))
+        item.nodes = [n["id"] for n in b.nodes[nodes_before:]]
+        for w in b.warnings[warnings_before:]:
+            raw = " kept as a SQL step" in w or w.startswith("skipped statement")
+            item.flag("review" if raw else "converted", w)
+        items.append(item)
     b.finish()
     if not b.nodes:
         raise SQLImportError("nothing in the SQL maps to a pipeline")
@@ -542,4 +553,17 @@ def import_sql(
     bad_names = [c for cols in b.cols.values() if cols for c in cols if not ID_PATTERN.match(c)]
     if bad_names:
         b.warnings.append(f"column names that need quoting: {sorted(set(bad_names))}")
-    return ImportResult(pipeline, b.warnings, outputs)
+    from redcliff.scorecard import Scorecard, lineage_coverage
+
+    card = Scorecard("sql", name, items, {}, lineage_coverage(pipeline))
+    return ImportResult(pipeline, b.warnings, outputs, card)
+
+
+def _statement_kind(stmt: exp.Expression) -> str:
+    if isinstance(stmt, exp.Create):
+        return f"CREATE {(stmt.args.get('kind') or 'TABLE').upper()} AS"
+    if isinstance(stmt, exp.Insert):
+        return "INSERT ... SELECT"
+    if isinstance(stmt, exp.Query):
+        return "SELECT"
+    return type(stmt).__name__.upper()

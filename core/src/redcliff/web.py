@@ -13,6 +13,8 @@ from typing import Any
 from redcliff.compile import compile_pyspark, compile_query, compile_script
 from redcliff.importer import import_sql as _import_sql
 from redcliff.lineage import Ref, blast_radius, build_graph, trace_to_sources
+from redcliff.powercenter import import_powercenter as _import_powercenter
+from redcliff.powercenter import mapping_names
 from redcliff.spec import Pipeline, validate
 
 
@@ -103,7 +105,16 @@ def import_sql(sql: str, dialect: str | None = None, schema: Any = None, name: s
     """Legacy SQL in, spec out, with warnings for anything kept as raw SQL."""
     schema_map = json.loads(schema) if isinstance(schema, str) else schema
     result = _import_sql(sql, dialect=dialect or None, name=name, schema=schema_map or None)
-    return {"spec": result.pipeline.to_dict(), "warnings": result.warnings, "outputs": result.outputs}
+    return {"spec": result.pipeline.to_dict(), "warnings": result.warnings, "outputs": result.outputs,
+            "scorecard": result.scorecard.to_dict()}
+
+
+@_wrap
+def import_powercenter(xml: str, mapping: Any = None) -> dict[str, Any]:
+    """A PowerCenter export in, spec and migration scorecard out."""
+    result = _import_powercenter(xml, mapping=mapping or None)
+    return {"spec": result.pipeline.to_dict(), "warnings": result.warnings, "outputs": result.outputs,
+            "scorecard": result.scorecard.to_dict(), "mappings": mapping_names(xml)}
 
 
 @_wrap

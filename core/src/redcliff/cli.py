@@ -1,6 +1,7 @@
 """The ``redcliff`` command line: import, validate, compile, inspect lineage and run pipelines.
 
     redcliff import legacy.sql --dialect teradata --schema schema.json -o pipeline.yaml
+    redcliff import mapping.xml -o pipeline.yaml --scorecard scorecard.md   (Informatica PowerCenter)
     redcliff validate pipeline.yaml
     redcliff compile pipeline.yaml --to spark
     redcliff lineage pipeline.yaml --impact orders.status
@@ -17,6 +18,7 @@ from pathlib import Path
 from redcliff.compile import CompileError, compile_pyspark, compile_query, compile_script
 from redcliff.importer import SQLImportError, import_sql
 from redcliff.lineage import Ref, blast_radius, build_graph, openlineage_facet, trace_to_sources
+from redcliff.powercenter import import_powercenter
 from redcliff.spec import SpecError, load_spec
 
 
@@ -69,9 +71,13 @@ def _err(message: str) -> None:
 
 
 def cmd_import(args) -> int:
-    schema = _read_mapping(args.schema) if args.schema else None
-    name = args.name or Path(args.sql).stem
-    result = import_sql(Path(args.sql).read_text(encoding="utf-8"), dialect=args.dialect, name=name, schema=schema)
+    text_in = Path(args.sql).read_text(encoding="utf-8")
+    if args.sql.lower().endswith(".xml") or text_in.lstrip().startswith("<"):
+        result = import_powercenter(text_in, mapping=args.mapping or None, name=args.name)
+    else:
+        schema = _read_mapping(args.schema) if args.schema else None
+        name = args.name or Path(args.sql).stem
+        result = import_sql(text_in, dialect=args.dialect, name=name, schema=schema)
     text = _write_spec(result.pipeline.to_dict(), args.output)
     if not args.output:
         print(text, end="")
@@ -80,6 +86,16 @@ def cmd_import(args) -> int:
          + (f" to {args.output}" if args.output else ""))
     for w in result.warnings:
         _err(f"warning: {w}")
+    card = result.scorecard
+    if card is not None:
+        c = card.counts()
+        _err(f"scorecard: {c['converted']} of {len(card.items)} converted ({card.automated():.0%}), "
+             f"{c['review']} to review, {c['manual']} to rewrite by hand")
+        if args.scorecard:
+            out = Path(args.scorecard)
+            out.write_text(json.dumps(card.to_dict(), indent=2) + "\n" if out.suffix == ".json"
+                           else card.to_markdown(), encoding="utf-8")
+            _err(f"scorecard written to {args.scorecard}")
     return 0
 
 
@@ -169,11 +185,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="redcliff", description="Legacy ETL in, clean Spark out.")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("import", help="turn SQL into a pipeline spec")
-    p.add_argument("sql", help="SQL file (one or more statements)")
+    p = sub.add_parser("import", help="turn legacy SQL or a PowerCenter mapping into a pipeline spec")
+    p.add_argument("sql", help="SQL file (one or more statements), or a PowerCenter XML export")
     p.add_argument("--dialect", help="sqlglot dialect, e.g. teradata, oracle, tsql, snowflake")
     p.add_argument("--schema", help="JSON/YAML mapping of table -> {column: type}")
     p.add_argument("--name", help="pipeline name (default: the file name)")
+    p.add_argument("--mapping", action="append", help="PowerCenter: import only this mapping (repeatable)")
+    p.add_argument("--scorecard", help="write the migration scorecard here (.md or .json)")
     p.add_argument("-o", "--output", help="write the spec here (.yaml or .json); default: stdout")
     p.set_defaults(func=cmd_import)
 

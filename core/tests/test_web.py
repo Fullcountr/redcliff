@@ -80,3 +80,15 @@ def test_errors_come_back_as_data():
     assert not out["ok"] and "could not parse" in out["error"]
     out = call(web.preview_query, spec("orders_revenue"), "nope")
     assert not out["ok"]
+
+
+def test_import_powercenter_returns_spec_and_scorecard():
+    from pathlib import Path
+
+    xml = (Path(__file__).parents[2] / "examples" / "legacy" / "powercenter" / "m_customer_revenue.xml").read_text()
+    out = json.loads(web.import_powercenter(xml))
+    assert out["ok"] and out["mappings"] == ["m_customer_revenue"]
+    assert out["scorecard"]["counts"] == {"converted": 12, "review": 2, "manual": 0}
+    assert json.loads(web.analyze(out["spec"]))["valid"]
+    bad = json.loads(web.import_powercenter("<nope/>"))
+    assert not bad["ok"] and "PowerCenter" in bad["error"]

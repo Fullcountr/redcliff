@@ -130,3 +130,15 @@ def test_installed_command_runs():
         pytest.skip("package not installed with its console script")
     out = subprocess.run([exe, "--help"], capture_output=True, text=True, check=True).stdout
     assert "Legacy ETL in, clean Spark out." in out
+
+
+def test_import_powercenter_with_scorecard(tmp_path, capsys):
+    xml = ROOT / "examples" / "legacy" / "powercenter" / "m_customer_revenue.xml"
+    spec, card = tmp_path / "pipeline.yaml", tmp_path / "scorecard.md"
+    assert main(["import", str(xml), "-o", str(spec), "--scorecard", str(card)]) == 0
+    err = capsys.readouterr().err
+    assert "scorecard: 12 of 14 converted (86%), 2 to review, 0 to rewrite by hand" in err
+    assert card.read_text().startswith("# Migration scorecard: m_customer_revenue")
+    assert main(["validate", str(spec)]) == 0
+    assert main(["import", str(xml), "--scorecard", str(tmp_path / "card.json")]) == 0
+    assert json.loads((tmp_path / "card.json").read_text())["counts"]["review"] == 2
