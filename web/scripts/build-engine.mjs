@@ -59,8 +59,11 @@ for (const f of readdirSync(specsDir).filter((f) => f.endsWith(".yaml"))) {
   specs[spec.name] = spec;
 }
 const legacy = readFileSync(join(repo, "examples", "legacy", "teradata_revenue.sql"), "utf8");
-const powercenter = readFileSync(join(repo, "examples", "legacy", "powercenter", "m_customer_revenue.xml"), "utf8");
-writeFileSync(join(samples, "samples.json"), JSON.stringify({ tables, specs, legacy, powercenter }, null, 2));
+const pcDir = join(repo, "examples", "legacy", "powercenter");
+const powercenter = readFileSync(join(pcDir, "m_customer_revenue.xml"), "utf8");
+const workflow = { xml: readFileSync(join(pcDir, "wf_customer_revenue.xml"), "utf8"),
+  params: readFileSync(join(pcDir, "wf_customer_revenue.par"), "utf8") };
+writeFileSync(join(samples, "samples.json"), JSON.stringify({ tables, specs, legacy, powercenter, workflow }, null, 2));
 
 // 5. Precomputed lineage, row counts and blast radius for the examples, so the canvas is
 //    interactive while Python and DuckDB load. Optional: needs sqlglot and duckdb in $PYTHON.

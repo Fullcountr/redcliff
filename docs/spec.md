@@ -38,10 +38,15 @@ nodes:                        # required, at least one
 | `aggregate` | 1 | `group_by`: list of names, `measures`: name: SQL aggregate (optional when grouping, which is `SELECT DISTINCT`) | group-by columns then measures |
 | `union` | 2+ | `distinct` (false default) | columns of the first input, matched by position |
 | `sql` | 0+ | `query`: one SELECT that reads its inputs by node id | the SELECT's columns |
-| `target` | 1 | `format`, `path` or `table`, `mode` (overwrite default, append) | none (writes data) |
+| `target` | 1 | `format`, `path` or `table`, `mode` (overwrite default, append), optional `pre_sql` and `post_sql` (lists of statements) | none (writes data) |
 
 The `sql` node is the escape hatch for logic without a node type yet (ORDER BY, LIMIT,
 subqueries in WHERE, QUALIFY). The SQL importer uses it so nothing is ever dropped silently.
+
+A target's `pre_sql` and `post_sql` run on the target platform, before and after the write:
+Spark SQL scripts and PySpark run them; the DuckDB preview script lists them in its header
+instead, because DuckDB stands in for the target only locally. The PowerCenter importer fills them
+from a session's Pre SQL and Post SQL.
 
 Rules the compiler follows:
 

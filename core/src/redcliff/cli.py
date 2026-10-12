@@ -73,7 +73,8 @@ def _err(message: str) -> None:
 def cmd_import(args) -> int:
     text_in = Path(args.sql).read_text(encoding="utf-8")
     if args.sql.lower().endswith(".xml") or text_in.lstrip().startswith("<"):
-        result = import_powercenter(text_in, mapping=args.mapping or None, name=args.name)
+        params = Path(args.params).read_text(encoding="utf-8") if args.params else None
+        result = import_powercenter(text_in, mapping=args.mapping or None, name=args.name, params=params)
     else:
         schema = _read_mapping(args.schema) if args.schema else None
         name = args.name or Path(args.sql).stem
@@ -192,6 +193,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--name", help="pipeline name (default: the file name)")
     p.add_argument("--mapping", action="append", help="PowerCenter: import only this mapping (repeatable)")
     p.add_argument("--scorecard", help="write the migration scorecard here (.md or .json)")
+    p.add_argument("--params", help="PowerCenter: a parameter file, for $$PARAMS in mappings and SQL")
     p.add_argument("-o", "--output", help="write the spec here (.yaml or .json); default: stdout")
     p.set_defaults(func=cmd_import)
 

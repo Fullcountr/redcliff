@@ -110,9 +110,9 @@ def import_sql(sql: str, dialect: str | None = None, schema: Any = None, name: s
 
 
 @_wrap
-def import_powercenter(xml: str, mapping: Any = None) -> dict[str, Any]:
-    """A PowerCenter export in, spec and migration scorecard out."""
-    result = _import_powercenter(xml, mapping=mapping or None)
+def import_powercenter(xml: str, mapping: Any = None, params: str | None = None) -> dict[str, Any]:
+    """A PowerCenter export (and optionally its parameter file) in, spec and migration scorecard out."""
+    result = _import_powercenter(xml, mapping=mapping or None, params=params or None)
     return {"spec": result.pipeline.to_dict(), "warnings": result.warnings, "outputs": result.outputs,
             "scorecard": result.scorecard.to_dict(), "mappings": mapping_names(xml)}
 

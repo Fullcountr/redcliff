@@ -8,13 +8,14 @@ const DIALECTS = [
 ] as const;
 
 export type ImportMode = "sql" | "powercenter";
+export type ImportSamples = { sql: string; powercenter: string; params?: string };
 
 type Props = {
   mode: ImportMode;
-  samples: { sql: string; powercenter: string };
+  samples: ImportSamples;
   busy: boolean;
   error: string | null;
-  onImport: (mode: ImportMode, text: string, dialect: string) => void;
+  onImport: (mode: ImportMode, text: string, dialect: string, params: string) => void;
   onClose: () => void;
 };
 
@@ -22,6 +23,7 @@ export function ImportDialog({ mode: initialMode, samples, busy, error, onImport
   const [mode, setMode] = useState<ImportMode>(initialMode);
   const [sql, setSql] = useState(samples.sql);
   const [xml, setXml] = useState(samples.powercenter);
+  const [params, setParams] = useState(samples.params ?? "");
   const [fileName, setFileName] = useState<string | null>(null);
   const [dialect, setDialect] = useState("teradata");
   const [over, setOver] = useState(false);
@@ -42,7 +44,7 @@ export function ImportDialog({ mode: initialMode, samples, busy, error, onImport
 
   return (
     <dialog ref={ref} className="dialog" onClose={onClose} aria-labelledby="import-title">
-      <form method="dialog" onSubmit={(e) => { e.preventDefault(); onImport(mode, text, dialect); }}>
+      <form method="dialog" onSubmit={(e) => { e.preventDefault(); onImport(mode, text, dialect, params); }}>
         <div className="dialog-head">
           <div>
             <h2 id="import-title">Import a legacy job</h2>
@@ -58,7 +60,7 @@ export function ImportDialog({ mode: initialMode, samples, busy, error, onImport
             </button>
             <button type="button" className="mode-card" aria-pressed={mode === "powercenter"} onClick={() => setMode("powercenter")}>
               <span className="mi-icon"><Workflow /></span>
-              <span><b>Informatica PowerCenter</b><span>A mapping or folder XML export, with a migration scorecard</span></span>
+              <span><b>Informatica PowerCenter</b><span>Mappings, mapplets, sessions and workflows, with a migration scorecard</span></span>
             </button>
           </div>
           <div
@@ -89,10 +91,18 @@ export function ImportDialog({ mode: initialMode, samples, busy, error, onImport
               </label>
             </>
           ) : (
-            <label className="field">
-              <span>Mapping XML</span>
-              <textarea className="code-input tall" value={xml} spellCheck={false} onChange={(e) => setXml(e.target.value)} />
-            </label>
+            <>
+              <label className="field">
+                <span>Export XML (mappings, mapplets, sessions, workflows)</span>
+                <textarea className="code-input tall" value={xml} spellCheck={false} onChange={(e) => setXml(e.target.value)} />
+              </label>
+              <details className="field params" open={!!params}>
+                <summary>Parameter file <span className="faint">(optional, sets $$PARAMS)</span></summary>
+                <textarea className="code-input" rows={6} value={params} spellCheck={false}
+                  placeholder={"[Global]\n$$RUN_DATE=2026-09-01"} onChange={(e) => setParams(e.target.value)}
+                  aria-label="Parameter file" />
+              </details>
+            </>
           )}
           {error && <p className="error">{error}</p>}
         </div>

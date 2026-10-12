@@ -9,7 +9,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { data } from "./engine/data";
 import { engine, engineReady, startEngine } from "./engine/engine";
-import { ImportDialog, type ImportMode } from "./components/ImportDialog";
+import { ImportDialog, type ImportMode, type ImportSamples } from "./components/ImportDialog";
 import { Inspector, type Tab } from "./components/Inspector";
 import { StepNode, type StepNodeType } from "./components/StepNode";
 import { layout } from "./layout";
@@ -24,6 +24,7 @@ import { BrandMark, Menu, MenuItem, useTheme, type Theme } from "./ui";
 type Precomputed = { analysis: Analysis; counts: Record<string, number>; impacts: Record<string, Impact> };
 type Samples = {
   tables: string[]; specs: Record<string, Spec>; legacy: string; powercenter: string;
+  workflow: { xml: string; params: string };
   precomputed: Record<string, Precomputed>;
 };
 type EngineState = { state: "loading" | "ready" | "failed"; ms?: number; error?: string };
@@ -71,9 +72,9 @@ export default function App() {
   const [scorecard, setScorecard] = useState<Scorecard | null>(null);
   const [activeItem, setActiveItem] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("step");
-  const [importing, setImporting] = useState<{ mode: ImportMode | null; busy: boolean; error: string | null }>({
-    mode: null, busy: false, error: null,
-  });
+  const [importing, setImporting] = useState<{
+    mode: ImportMode | null; busy: boolean; error: string | null; workflow?: boolean;
+  }>({ mode: null, busy: false, error: null });
   const [toast, setToast] = useState<string | null>(null);
   const [example, setExample] = useState("orders_revenue");
   const [theme, setTheme, dark] = useTheme();
@@ -350,13 +351,13 @@ export default function App() {
     }
   };
 
-  const doImport = async (mode: ImportMode, text: string, dialect: string) => {
-    setImporting({ mode, busy: true, error: null });
+  const doImport = async (mode: ImportMode, text: string, dialect: string, params: string) => {
+    setImporting((s) => ({ ...s, mode, busy: true, error: null }));
     const r = mode === "powercenter"
-      ? await engine.importPowercenter(text)
+      ? await engine.importPowercenter(text, params)
       : await engine.importSql(text, dialect, await dataLoaded.current!.then(data.schema, () => ({})), "imported");
     if (!r.ok) {
-      setImporting({ mode, busy: false, error: r.error });
+      setImporting((s) => ({ ...s, mode, busy: false, error: r.error }));
       return;
     }
     loaded(r, mode === "powercenter" ? "Imported the mapping" : "Imported the SQL");
@@ -474,6 +475,8 @@ export default function App() {
                   onClick={() => { close(); setImporting({ mode: "sql", busy: false, error: null }); }} />
                 <MenuItem icon={Workflow} title="PowerCenter mapping" sub="11 transformations, 2 targets"
                   onClick={() => { close(); setImporting({ mode: "powercenter", busy: false, error: null }); }} />
+                <MenuItem icon={Workflow} title="PowerCenter workflow" sub="Mapplet, session, parameter file, tasks"
+                  onClick={() => { close(); setImporting({ mode: "powercenter", busy: false, error: null, workflow: true }); }} />
               </>
             )}
           </Menu>
@@ -585,7 +588,9 @@ export default function App() {
       {importing.mode && samples && (
         <ImportDialog
           mode={importing.mode}
-          samples={{ sql: samples.legacy, powercenter: samples.powercenter }}
+          samples={(importing.workflow
+            ? { sql: samples.legacy, powercenter: samples.workflow.xml, params: samples.workflow.params }
+            : { sql: samples.legacy, powercenter: samples.powercenter }) satisfies ImportSamples}
           busy={importing.busy}
           error={importing.error}
           onImport={doImport}

@@ -30,6 +30,7 @@ class ScoreItem:
     status: str = CONVERTED
     nodes: list[str] = field(default_factory=list)   # Redcliff node ids it became
     notes: list[str] = field(default_factory=list)
+    area: str = "pipeline"         # "pipeline", or "orchestration" for workflow tasks
 
     def flag(self, status: str, note: str | None = None) -> None:
         self.status = worst(self.status, status)
@@ -38,7 +39,7 @@ class ScoreItem:
 
     def to_dict(self) -> dict[str, Any]:
         return {"name": self.name, "kind": self.kind, "status": self.status, "nodes": list(self.nodes),
-                "notes": list(self.notes)}
+                "notes": list(self.notes), "area": self.area}
 
 
 @dataclass
@@ -76,6 +77,10 @@ class Scorecard:
             f"**{c[CONVERTED]} of {total}** converted automatically ({self.automated():.0%}), "
             f"**{c[REVIEW]}** to review, **{c[MANUAL]}** to rewrite by hand.",
         ]
+        orchestration = sum(i.area == "orchestration" for i in self.items)
+        if orchestration:
+            lines.append(f"{orchestration} of the {total} are workflow tasks, which belong in an orchestrator "
+                         "rather than a pipeline.")
         if self.lineage:
             lin = self.lineage
             lines.append(f"Lineage: {lin['traced']} of {lin['columns']} target columns trace back to a source.")

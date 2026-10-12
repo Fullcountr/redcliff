@@ -142,12 +142,19 @@ def powercenter() -> Pipeline:
     return import_powercenter(xml).pipeline
 
 
+def workflow() -> Pipeline:
+    pc = ROOT / "examples" / "legacy" / "powercenter"
+    return import_powercenter((pc / "wf_customer_revenue.xml").read_text(),
+                              params=(pc / "wf_customer_revenue.par").read_text()).pipeline
+
+
 PIPELINES = {
     "orders_revenue": lambda: example("orders_revenue"),
     "customer_cleanup": lambda: example("customer_cleanup"),
     "daily_events": lambda: example("daily_events"),
     "teradata_revenue": teradata,
     "m_customer_revenue": powercenter,
+    "wf_customer_revenue": workflow,  # mapplet, session overrides, parameter file, post-SQL
 }
 
 

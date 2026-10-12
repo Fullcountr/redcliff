@@ -813,6 +813,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .drop b { font-weight: 600; display: block; }
 .drop p { margin: 0; font-size: 12px; color: var(--text-3); }
 .drop .btn { margin-left: auto; }
+.params summary { cursor: pointer; font-size: 12px; font-weight: 550; color: var(--text-2); margin-bottom: 6px; }
+.params summary .faint { font-weight: 400; }
 .inline-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
 /* ------------------------------------------------------------------ small screens */

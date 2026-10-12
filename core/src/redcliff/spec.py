@@ -188,6 +188,18 @@ def _check_io(issues: list[Issue], nid: str, params: dict, writing: bool) -> Non
     if writing:
         if params.get("mode", "overwrite") not in WRITE_MODES:
             issues.append(Issue(nid, f"'mode' must be one of {list(WRITE_MODES)}"))
+        for hook in ("pre_sql", "post_sql"):
+            statements = params.get(hook)
+            if statements is None:
+                continue
+            if not isinstance(statements, list) or not all(isinstance(s, str) and s.strip() for s in statements):
+                issues.append(Issue(nid, f"'{hook}' must be a list of SQL statements"))
+                continue
+            for sql in statements:
+                try:
+                    sqlglot.parse_one(sql)
+                except ParseError as e:
+                    issues.append(Issue(nid, f"'{hook}' is not valid SQL ({sql!r}): {str(e).splitlines()[0]}"))
     else:
         cols = params.get("columns")
         if cols is not None:

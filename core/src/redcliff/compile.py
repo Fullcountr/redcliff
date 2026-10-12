@@ -76,6 +76,11 @@ def _transpile(neutral_sql: str, dialect: str) -> str:
     return sqlglot.transpile(neutral_sql, write=dialect, pretty=True)[0]
 
 
+def _statement(neutral_sql: str, dialect: str) -> str:
+    """A one-line statement (pre/post SQL); pretty printing only pads these."""
+    return sqlglot.transpile(neutral_sql, write=dialect)[0]
+
+
 def _expr(neutral: str, dialect: str) -> str:
     return sqlglot.parse_one(neutral).sql(dialect)
 
@@ -248,6 +253,23 @@ def _write_statement(target: Node, dialect: str, base_dir, blocks: list[str]) ->
     return f"-- {target.id}: target\n{head}{insert}\n{query}"
 
 
+def _hooks(target: Node, dialect: str) -> tuple[list[str], list[str]]:
+    """A target's pre/post SQL as statements for the script. DuckDB lists them in the header instead."""
+    if dialect == "duckdb":
+        return [], []
+
+    def stmts(key: str, label: str) -> list[str]:
+        return [f"-- {target.id}: {label}\n{_statement(sql, dialect)}" for sql in target.params.get(key) or []]
+
+    return stmts("pre_sql", "pre-SQL"), stmts("post_sql", "post-SQL")
+
+
+def _hook_comments(target: Node) -> list[str]:
+    return [f"{target.id} {label}: {' '.join(sql.split())}"
+            for key, label in (("pre_sql", "before"), ("post_sql", "after"))
+            for sql in target.params.get(key) or []]
+
+
 def compile_script(pipeline: Pipeline, dialect: str = "duckdb", base_dir=None) -> str:
     """A runnable script that writes every target. One statement per target."""
     _check_dialect(dialect)
@@ -259,8 +281,16 @@ def compile_script(pipeline: Pipeline, dialect: str = "duckdb", base_dir=None) -
     for target in targets:
         blocks, views = _cte_chain(pipeline, _ancestors(pipeline, target.id), dialect, base_dir)
         all_views += [v for v in views if v not in all_views]
+        pre, post = _hooks(target, dialect)
+        statements += pre
         statements.append(_write_statement(target, dialect, base_dir, blocks))
+        statements += post
     header = f"-- Redcliff pipeline: {pipeline.name} ({dialect})\n"
+    if dialect == "duckdb":
+        notes = [line for t in targets for line in _hook_comments(t)]
+        if notes:
+            header += "-- Pre/post SQL for the target platform (not run by this DuckDB preview script):\n"
+            header += "".join(f"--   {line}\n" for line in notes)
     if dialect == "duckdb" and any(t.params["format"] != "table" for t in targets):
         header += "-- Output folders must exist before running: DuckDB's COPY does not create them.\n"
     return header + _views_header(all_views) + ";\n\n".join(statements) + ";\n"
@@ -341,6 +371,8 @@ def compile_pyspark(pipeline: Pipeline, base_dir=None) -> str:
                 chain += ".distinct()"
             lines.append(f"{var} = {chain}")
         elif t == "target":
+            for sql in p.get("pre_sql") or []:
+                lines.append(f"spark.sql({_statement(sql, 'spark')!r})  # pre-SQL")
             writer = f'{ins[0]}.write.mode({p.get("mode", "overwrite")!r})'
             if p["format"] == "table":
                 lines.append(f"{writer}.saveAsTable({p['table']!r})")
@@ -348,4 +380,6 @@ def compile_pyspark(pipeline: Pipeline, base_dir=None) -> str:
                 if p["format"] == "csv":
                     writer += '.option("header", True)'
                 lines.append(f"{writer}.{p['format']}({_path(node, base_dir)!r})")
+            for sql in p.get("post_sql") or []:
+                lines.append(f"spark.sql({_statement(sql, 'spark')!r})  # post-SQL")
     return "\n".join(lines) + "\n"

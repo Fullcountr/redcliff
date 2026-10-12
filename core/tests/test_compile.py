@@ -252,3 +252,28 @@ def test_infer_columns():
     assert cols["web_tagged"] == ["event_id", "user_id", "event_time", "event_name", "channel", "event_day"]
     assert cols["daily_counts"] == ["event_day", "channel", "events", "users"]
     assert cols["out"] == []
+
+
+def test_target_pre_and_post_sql_run_around_the_write():
+    from redcliff.spec import Pipeline, validate
+
+    spec = {"version": 0, "name": "hooks", "nodes": [
+        {"id": "orders", "type": "source", "params": {"format": "table", "table": "orders"}},
+        {"id": "out", "type": "target", "inputs": ["orders"], "params": {
+            "format": "table", "table": "orders_copy",
+            "pre_sql": ["TRUNCATE TABLE orders_copy"], "post_sql": ["ANALYZE TABLE orders_copy COMPUTE STATISTICS"]}},
+    ]}
+    pipeline = Pipeline.from_dict(spec)
+    assert validate(pipeline) == []
+    spark = compile_script(pipeline, "spark")
+    assert spark.index("TRUNCATE TABLE orders_copy") < spark.index("INSERT OVERWRITE TABLE orders_copy") \
+        < spark.index("ANALYZE TABLE orders_copy COMPUTE STATISTICS")
+    duck = compile_script(pipeline, "duckdb")
+    assert "--   out after: ANALYZE TABLE orders_copy COMPUTE STATISTICS" in duck
+    assert "\nANALYZE" not in duck  # listed for the target platform, not run by DuckDB
+    py = compile_pyspark(pipeline)
+    assert py.index("spark.sql('TRUNCATE TABLE orders_copy')") < py.index("saveAsTable") < py.index("ANALYZE TABLE")
+
+    bad = Pipeline.from_dict({**spec, "nodes": [spec["nodes"][0], {**spec["nodes"][1], "params": {
+        "format": "table", "table": "t", "post_sql": "ANALYZE"}}]})
+    assert any("'post_sql' must be a list" in str(i) for i in validate(bad))

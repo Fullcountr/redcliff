@@ -1,0 +1,7 @@
+[Global]
+$$MIN_ORDER_DATE=2026-01-01
+
+[SALES_MART.WF:wf_customer_revenue.ST:s_m_customer_revenue]
+$$MIN_ORDER_DATE=2026-09-02
+$DBConnection_Source=ORA_SALES
+$DBConnection_Target=ORA_MART

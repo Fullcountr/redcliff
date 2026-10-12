@@ -330,7 +330,7 @@ class _Parser:
         name = text.upper()
         if name in self.params:
             value, kind = self.params[name]
-            self.note(REVIEW, f"mapping parameter {name} is fixed at its default {value!r}; "
+            self.note(REVIEW, f"mapping parameter {name} is fixed at {value!r}; "
                               "make it a pipeline variable if it changes between runs")
             if kind == "number":
                 try:

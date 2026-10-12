@@ -46,6 +46,9 @@ from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
 
 from redcliff.importer import ImportResult, SQLImportError, _Builder
 from redcliff.informatica import CONVERTED, MANUAL, REVIEW, ExpressionError, _p, kind_of_type, translate
+from redcliff.powercenter_workflow import (
+    Session, Workflow, flatten_mapplets, is_mapplet, parse_folder, parse_param_file, resolve_params, substitute,
+)
 from redcliff.scorecard import ScoreItem, Scorecard, lineage_coverage
 from redcliff.spec import ID_PATTERN, Pipeline, SpecError, validate
 
@@ -139,6 +142,11 @@ def _output_name(port: str, existing: list[str]) -> str:
     return bare if bare != slug and bare not in existing else slug
 
 
+def _label(attribute: str) -> str:
+    """A PowerCenter attribute name for people: PRE SQL -> Pre SQL."""
+    return re.sub(r"\bSql\b", "SQL", attribute.title())
+
+
 def _slug(name: str) -> str:
     s = re.sub(r"[^a-z0-9_]", "_", name.lower()).strip("_") or "x"
     return s if re.match(r"[a-z_]", s[0]) else "_" + s
@@ -171,8 +179,10 @@ class _Manual(Exception):
 
 
 class _MappingConverter:
-    def __init__(self, imp: "_Importer", mapping: ET.Element):
+    def __init__(self, imp: "_Importer", mapping: ET.Element, session: Session | None = None,
+                 file_params: dict[str, str] | None = None):
         self.imp = imp
+        self.session = session
         self.b = imp.b
         self.el = mapping
         self.name = mapping.get("NAME") or "mapping"
@@ -190,10 +200,18 @@ class _MappingConverter:
             if frm in self.used:
                 self.used[frm].add(ff)
         self.params: dict[str, tuple[str, str | None]] = {}
+        kinds: dict[str, str | None] = {}
         for v in mapping.findall("MAPPINGVARIABLE"):
+            pname = (v.get("NAME") or "").upper()
+            kinds[pname] = kind_of_type(v.get("DATATYPE"))
             default = v.get("DEFAULTVALUE")
             if default is not None and default != "":
-                self.params[(v.get("NAME") or "").upper()] = (default, kind_of_type(v.get("DATATYPE")))
+                self.params[pname] = (default, kinds[pname])
+        self.from_file: set[str] = set()
+        for pname, value in (file_params or {}).items():
+            if pname.startswith("$$"):
+                self.params[pname] = (value, kinds.get(pname))
+                self.from_file.add(pname)
         self.env: dict[str, dict[str, Any]] = {}
         self.item: ScoreItem | None = None
 
@@ -240,6 +258,32 @@ class _MappingConverter:
     def note(self, status: str, message: str) -> None:
         if self.item is not None:
             self.item.flag(status, message)
+
+    def attrs(self, name: str, tdef: ET.Element | None) -> dict[str, str]:
+        """A transformation's attributes: its definition, then the instance, then the session."""
+        merged = _attrs(tdef) if tdef is not None else {}
+        inst = self.instances.get(name)
+        if inst is not None:
+            merged.update({k: v for k, v in _attrs(inst).items() if v.strip()})
+        overrides = (self.session.attrs.get(name) or {}) if self.session else {}
+        if overrides:
+            merged.update(overrides)
+            shown = ", ".join(_label(k) for k in overrides)
+            self.note(CONVERTED, f"session {self.session.label} sets: {shown}")
+        return merged
+
+    def subst(self, text: str) -> str:
+        """Expand $$PARAMS in SQL text, as PowerCenter does before running it."""
+        values = {k: v for k, (v, _kind) in self.params.items()}
+        out, used, missing = substitute(text, values)
+        for pname in dict.fromkeys(used):
+            where = "the parameter file" if pname in self.from_file else "its default"
+            self.note(REVIEW, f"{pname} is fixed at {values[pname]!r} (from {where}); make it a pipeline "
+                              "variable if it changes between runs")
+        if missing:
+            raise _Manual(f"its SQL uses {', '.join(dict.fromkeys(missing))}, which has no value; "
+                          "pass the parameter file")
+        return out
 
     def refs(self, name: str, ports: list[_Port] | None = None) -> dict[str, Any]:
         """Each connected input port of an instance -> the value feeding it."""
@@ -371,7 +415,7 @@ class _MappingConverter:
         for name in self.order():
             inst = self.instances[name]
             ttype = inst.get("TRANSFORMATION_TYPE") or inst.get("TYPE") or "?"
-            item = ScoreItem(name, ttype)
+            item = ScoreItem(self.imp.display.get(name, name), ttype)
             self.item = item
             before = len(self.b.nodes)
             warnings_before = len(self.b.warnings)
@@ -384,7 +428,8 @@ class _MappingConverter:
                 item.flag(REVIEW, w)
             del self.b.warnings[warnings_before:]
             item.nodes = [n["id"] for n in self.b.nodes[before:]]
-            self.imp.items.append(item)
+            if ttype.lower() not in ("input transformation", "output transformation"):
+                self.imp.items.append(item)  # a mapplet's Input/Output steps are plumbing
         self.item = None
 
     def convert(self, name: str, inst: ET.Element, ttype: str) -> dict[str, Any]:
@@ -395,7 +440,8 @@ class _MappingConverter:
         if kind == "TARGET" or t == "target definition":
             return self.target(name, inst)
         if t == "mapplet" or kind == "MAPPLET":
-            raise _Manual("mapplets aren't expanded yet")
+            raise _Manual(f"mapplet {inst.get('TRANSFORMATION_NAME') or name} isn't in the export, so it "
+                          "can't be expanded")
         tdef = self.definition(inst)
         if tdef is None:
             raise _Manual(f"the definition of {inst.get('TRANSFORMATION_NAME') or name} isn't in the export "
@@ -416,6 +462,8 @@ class _MappingConverter:
             "sequence": self.sequence,
             "sequence generator": self.sequence,
             "transaction control": self.passthrough,
+            "input transformation": self.passthrough,
+            "output transformation": self.passthrough,
         }.get(t) or ({"union transformation": self.union}.get(template))
         if handler is None:
             raise _Manual(f"{ttype} transformations have no Redcliff equivalent yet")
@@ -473,17 +521,49 @@ class _MappingConverter:
         flat = (tdef.get("DATABASETYPE") or "").lower() == "flat file"
         params: dict[str, Any] = {"format": "csv", "path": f"{table}.csv"} if flat else \
             {"format": "table", "table": table}
-        params["mode"] = "append"
+        a = self.attrs(name, None)
+        truncate = a.get("TRUNCATE TARGET TABLE OPTION", "").strip().upper() in ("YES", "1", "TRUE")
+        params["mode"] = "overwrite" if truncate else "append"
+        dialect = _DIALECTS.get((tdef.get("DATABASETYPE") or "").lower())
+        for key, hook in (("PRE SQL", "pre_sql"), ("POST SQL", "post_sql")):
+            statements = self.hooks(self.subst(a.get(key, "")), dialect, _label(key))
+            if statements:
+                params[hook] = statements
         imp.add("target", [node], params, _slug(name), "branch")
         imp.written[table] = node
         imp.writer[table] = self.name
         imp.outputs.append(node)
-        self.note(CONVERTED, "rows are appended, as PowerCenter inserts by default; set mode to overwrite "
-                             "if the session truncates the target")
+        if truncate:
+            self.note(CONVERTED, "the session truncates the target, so rows overwrite it")
+        elif self.session is None:
+            self.note(CONVERTED, "rows are appended, as PowerCenter inserts by default; set mode to overwrite "
+                                 "if the session truncates the target (import the session to know)")
+        else:
+            self.note(CONVERTED, f"rows are appended: session {self.session.label} doesn't truncate the target")
         if missing:
             self.note(CONVERTED, f"{len(missing)} target column(s) aren't connected and get the database "
                                  f"default: {', '.join(missing)}")
         return {}
+
+    def hooks(self, text: str, dialect: str | None, label: str) -> list[str]:
+        """Pre/post SQL as neutral statements. PowerCenter separates statements with ';'."""
+        out = []
+        for raw in re.split(r"(?<!\\);", text):
+            raw = raw.replace("\\;", ";").strip()
+            if not raw:
+                continue
+            try:
+                tree = sqlglot.parse_one(raw, read=dialect)
+            except ParseError as e:
+                self.note(REVIEW, f"{label} couldn't be parsed and was left out: {raw} ({str(e).splitlines()[0]})")
+                continue
+            if isinstance(tree, exp.Command):
+                self.note(REVIEW, f"{label} kept as written; check it runs on the target platform: {raw}")
+                out.append(raw)
+                continue
+            out.append(normalize_identifiers(tree).sql())
+            self.note(CONVERTED, f"{label} carried into the target: {out[-1]}")
+        return out
 
     def placeholder(self, name: str, inst: ET.Element) -> dict[str, Any]:
         """Keep the pipeline whole: pass inputs through and give each output port a typed NULL."""
@@ -521,7 +601,7 @@ class _MappingConverter:
 
     def source_qualifier(self, name: str, inst: ET.Element, tdef: ET.Element) -> dict[str, Any]:
         ports = _ports(tdef, "TRANSFORMFIELD")
-        attrs = _attrs(tdef)
+        attrs = self.attrs(name, tdef)
         refs = self.refs(name)
         imp = self.imp
         # Which source table each connected port reads, by the source instance it is wired from.
@@ -534,7 +614,11 @@ class _MappingConverter:
         dialects = {imp.dialect_of.get(r.node) for r in refs.values() if isinstance(r, _Col)}
         dialect = next(iter(dialects)) if len(dialects) == 1 else None
 
-        override = attrs.get("SQL QUERY", "").strip()
+        override = self.subst(attrs.get("SQL QUERY", "").strip())
+        for key in ("PRE SQL", "POST SQL"):
+            if attrs.get(key, "").strip():
+                self.note(REVIEW, f"{_label(key)} runs on the source database in PowerCenter; Redcliff doesn't "
+                                  f"run it: {' '.join(attrs[key].split())}")
         if override:
             return self.sq_override(name, ports, override, dialect)
 
@@ -551,7 +635,7 @@ class _MappingConverter:
         if not projections:
             raise _Manual("no ports are connected")
         tables = list(dict.fromkeys(sources.values()))
-        join = attrs.get("USER DEFINED JOIN", "").strip()
+        join = self.subst(attrs.get("USER DEFINED JOIN", "").strip())
         where: list[str] = []
         if join.startswith("{") and join.endswith("}"):
             from_sql = join[1:-1]  # PowerCenter's outer join syntax: {A LEFT OUTER JOIN B ON ...}
@@ -565,7 +649,7 @@ class _MappingConverter:
                     raise _Manual("it joins several sources with no user-defined join or foreign keys")
                 where.append(" AND ".join(keys))
                 self.note(CONVERTED, "joined on the foreign keys in the source definitions, as PowerCenter does")
-        source_filter = attrs.get("SOURCE FILTER", "").strip()
+        source_filter = self.subst(attrs.get("SOURCE FILTER", "").strip())
         if source_filter:
             where.append(f"({source_filter})")
         if len(where) == 1 and where[0].startswith("(") and where[0].endswith(")"):
@@ -577,9 +661,6 @@ class _MappingConverter:
         sorted_ports = attrs.get("NUMBER OF SORTED PORTS", "0").strip()
         if sorted_ports not in ("", "0"):
             self.note(CONVERTED, "sorted ports dropped: row order doesn't matter to set-based steps")
-        for key in ("PRE SQL", "POST SQL"):
-            if attrs.get(key, "").strip():
-                self.note(REVIEW, f"{key.title()} isn't run; move it to the target database's own jobs")
         node = self.run_sql(sql, dialect, _slug(name))
         return {p.name: _Col(node, _slug(p.name)) for p in ports if p.name in self.incoming[name]
                 and _slug(p.name) in (self.b.cols[node] or [])}
@@ -662,7 +743,7 @@ class _MappingConverter:
         return {p.name: refs[p.name] for p in ports if p.name in refs}
 
     def sequence(self, name: str, inst: ET.Element, tdef: ET.Element) -> dict[str, Any]:
-        a = _attrs(tdef)
+        a = self.attrs(name, tdef)
 
         def num(key: str, default: int) -> int:
             try:
@@ -684,7 +765,7 @@ class _MappingConverter:
         base, colmap = self.merge(refs, _slug(name))
         if base is None:
             raise _Manual("nothing is connected to it")
-        condition = _attrs(tdef).get("FILTER CONDITION", "").strip() or "TRUE"
+        condition = self.attrs(name, tdef).get("FILTER CONDITION", "").strip() or "TRUE"
         cond = self.expr("condition", condition, self.resolver(colmap, ports))
         node = base
         if not (isinstance(cond, exp.Boolean) and cond.this):
@@ -779,19 +860,19 @@ class _MappingConverter:
                              f"{_slug(name)}_master", "chain")
             m_map = {p: rename.get(c, c) for p, c in m_map.items()}
         qualifier = {**{p: d_base for p in d_map}, **{p: m_base for p in m_map}}
-        condition = _attrs(tdef).get("JOIN CONDITION", "").strip()
+        condition = self.attrs(name, tdef).get("JOIN CONDITION", "").strip()
         if not condition:
             raise _Manual("it has no join condition")
         cond = self.expr("condition", condition, self.resolver({**d_map, **m_map}, ports, qualifier))
         how = {"normal join": "inner", "master outer join": "left", "detail outer join": "right",
-               "full outer join": "full"}.get(_attrs(tdef).get("JOIN TYPE", "Normal Join").strip().lower(), "inner")
+               "full outer join": "full"}.get(self.attrs(name, tdef).get("JOIN TYPE", "Normal Join").strip().lower(), "inner")
         params = {"condition": cond.sql()} if how == "inner" else {"how": how, "condition": cond.sql()}
         node = imp.add("join", [d_base, m_base], params, _slug(name), "active")
         return {**{p: _Col(node, c) for p, c in d_map.items()}, **{p: _Col(node, c) for p, c in m_map.items()}}
 
     def lookup(self, name: str, inst: ET.Element, tdef: ET.Element) -> dict[str, Any]:
         ports = _ports(tdef, "TRANSFORMFIELD")
-        a = _attrs(tdef)
+        a = self.attrs(name, tdef)
         if not self.incoming[name]:
             raise _Manual("it is an unconnected lookup, called from expressions with :LKP")
         if a.get("DYNAMIC LOOKUP CACHE", "").upper() in ("YES", "1"):
@@ -805,7 +886,7 @@ class _MappingConverter:
         imp = self.imp
         table = _slug(a.get("LOOKUP TABLE NAME", "") or name)
         lk_dialect = None
-        override = a.get("LOOKUP SQL OVERRIDE", "").strip()
+        override = self.subst(a.get("LOOKUP SQL OVERRIDE", "").strip())
         if override:
             lk_node = self.run_sql(override, lk_dialect, f"{_slug(name)}_rows")
             lk_cols = self.b.cols[lk_node] or []
@@ -823,7 +904,7 @@ class _MappingConverter:
                                   table, "active")
                 self.b.tables.setdefault(table, lk_node)
             lk_map = {p.name: _slug(p.name) for p in lookups}
-        source_filter = a.get("LOOKUP SOURCE FILTER", "").strip()
+        source_filter = self.subst(a.get("LOOKUP SOURCE FILTER", "").strip())
         if source_filter:
             try:
                 f = normalize_identifiers(sqlglot.parse_one(source_filter, read=lk_dialect)).sql()
@@ -956,7 +1037,7 @@ class _MappingConverter:
     def sorter(self, name: str, inst: ET.Element, tdef: ET.Element) -> dict[str, Any]:
         ports = _ports(tdef, "TRANSFORMFIELD")
         refs = self.refs(name, ports)
-        a = _attrs(tdef)
+        a = self.attrs(name, tdef)
         if a.get("DISTINCT", "NO").upper() in ("YES", "1"):
             base, colmap = self.merge(refs, _slug(name))
             if base is None:
@@ -971,7 +1052,7 @@ class _MappingConverter:
     def update_strategy(self, name: str, inst: ET.Element, tdef: ET.Element) -> dict[str, Any]:
         ports = _ports(tdef, "TRANSFORMFIELD")
         refs = self.refs(name, ports)
-        text = _attrs(tdef).get("UPDATE STRATEGY EXPRESSION", "DD_INSERT").strip() or "DD_INSERT"
+        text = self.attrs(name, tdef).get("UPDATE STRATEGY EXPRESSION", "DD_INSERT").strip() or "DD_INSERT"
         words = set(re.findall(r"[A-Z_]+|\d+", text.upper()))
         if words <= {"DD_INSERT", "0"}:
             self.note(CONVERTED, "every row is an insert, so no step is needed")
@@ -1023,6 +1104,7 @@ class _Importer:
         self.tip: dict[str, str] = {}
         self.prov: dict[str, dict[str, str]] = {}
         self.dialect_of: dict[str, str | None] = {}
+        self.display: dict[str, str] = {}  # flattened mapplet instance -> MAPPLET/INSTANCE
         self.synced = 0
 
     def sync(self) -> None:
@@ -1086,11 +1168,14 @@ def _mapping_order(mappings: list[ET.Element], imp: _Importer) -> list[ET.Elemen
     return [mappings[i] for i in order]
 
 
-def import_powercenter(xml: str, mapping: str | list[str] | None = None, name: str | None = None) -> ImportResult:
+def import_powercenter(xml: str, mapping: str | list[str] | None = None, name: str | None = None,
+                       params: str | None = None) -> ImportResult:
     """Import a PowerCenter repository export (the XML from Designer or ``pmrep``).
 
     ``mapping`` picks mappings by name; by default every mapping in the export is imported into
-    one pipeline. The result carries a :class:`~redcliff.scorecard.Scorecard`.
+    one pipeline. Mapplets are expanded. Sessions in the export apply their overrides, and
+    workflows set the order. ``params`` is the text of a parameter file. The result carries a
+    :class:`~redcliff.scorecard.Scorecard`.
     """
     xml = re.sub(r"<!DOCTYPE[^>]*>", "", xml, count=1)  # powrmart.dtd is never fetched
     try:
@@ -1102,7 +1187,10 @@ def import_powercenter(xml: str, mapping: str | list[str] | None = None, name: s
 
     imp = _Importer()
     folders = root.findall(".//FOLDER") or [root]
-    mappings: list[ET.Element] = []
+    mappings: list[tuple[ET.Element, str]] = []   # (mapping, folder name)
+    mapplets: dict[str, ET.Element] = {}
+    sessions: dict[str, Session] = {}
+    workflows: list[Workflow] = []
     for folder in folders:
         for s in folder.findall("SOURCE"):
             imp.sources.setdefault((s.get("NAME") or "").upper(), s)
@@ -1110,23 +1198,75 @@ def import_powercenter(xml: str, mapping: str | list[str] | None = None, name: s
             imp.targets.setdefault((t.get("NAME") or "").upper(), t)
         for t in folder.findall("TRANSFORMATION"):
             imp.transforms.setdefault((t.get("NAME") or "").upper(), t)
-        mappings += folder.findall("MAPPING")
+        for m in folder.findall("MAPPLET"):
+            mapplets.setdefault((m.get("NAME") or "").upper(), m)
+        fsessions, fworkflows = parse_folder(folder)
+        sessions.update(fsessions)
+        workflows += fworkflows
+        mappings += [(m, (folder.get("NAME") or "")) for m in folder.findall("MAPPING")]
     if mapping is not None:
         wanted = {m.upper() for m in ([mapping] if isinstance(mapping, str) else mapping)}
-        found = [m for m in mappings if (m.get("NAME") or "").upper() in wanted]
+        found = [(m, f) for m, f in mappings if (m.get("NAME") or "").upper() in wanted]
         if not found:
-            names = ", ".join(m.get("NAME") or "?" for m in mappings) or "none"
+            names = ", ".join(m.get("NAME") or "?" for m, _ in mappings) or "none"
             raise PowerCenterImportError(f"no mapping named {mapping!r}; the export has: {names}")
         mappings = found
     if not mappings:
         raise PowerCenterImportError("the export has no mappings")
 
-    for m in _mapping_order(mappings, imp):
-        _MappingConverter(imp, m).run()
+    # Which session runs each mapping, and where it falls in the workflows' run order.
+    run_order: list[str] = []
+    for wf in workflows:
+        run_order += [wf.sessions[t] for t in wf.order if t in wf.sessions]
+    run_order += [s for s in sessions if s not in run_order]
+    session_of: dict[str, Session] = {}
+    extra_sessions: dict[str, list[str]] = {}
+    for sname in run_order:
+        sess = sessions.get(sname)
+        if sess is None:
+            continue
+        if sess.mapping in session_of:
+            extra_sessions.setdefault(sess.mapping, []).append(sess.name)
+        else:
+            session_of[sess.mapping] = sess
+    position = {m: i for i, m in enumerate(s.mapping for s in (sessions[n] for n in run_order if n in sessions))}
+    mappings.sort(key=lambda mf: position.get((mf[0].get("NAME") or "").upper(), len(position)))
+
+    sections = parse_param_file(params) if params else []
+    folder_of: dict[int, str] = {}
+    flat: list[ET.Element] = []
+    missing_mapplets: dict[str, list[str]] = {}
+    for m, fname in mappings:
+        f, missing = flatten_mapplets(m, mapplets, imp.display, imp.transforms)
+        flat.append(f)
+        folder_of[id(f)] = fname
+        if missing:
+            missing_mapplets[(m.get("NAME") or "").upper()] = missing
+
+    for m in _mapping_order(flat, imp):
+        mname = (m.get("NAME") or "").upper()
+        sess = session_of.get(mname)
+        file_params = resolve_params(sections, folder_of[id(m)], sess.workflow if sess else None,
+                                     sess.name if sess else None) if sections else {}
+        before = len(imp.items)
+        _MappingConverter(imp, m, sess, file_params).run()
+        if mname in extra_sessions and len(imp.items) > before:
+            imp.items[before].flag(REVIEW, f"mapping {m.get('NAME')} also runs in session(s) "
+                                           f"{', '.join(extra_sessions[mname])}; only {sess.label}'s overrides "
+                                           "were applied")
+
+    imported = {(m.get("NAME") or "").upper() for m, _ in mappings}
+    for wf in workflows:
+        if not any(sessions.get(sn) and sessions[sn].mapping in imported for sn in wf.sessions.values()):
+            continue
+        _workflow_items(imp, wf, sessions)
 
     if not imp.b.nodes:
         raise PowerCenterImportError("nothing in the mappings could be imported")
-    title = name or (mappings[0].get("NAME") if len(mappings) == 1 else
+    titled = [w for w in workflows if any(sessions.get(sn) and sessions[sn].mapping in imported
+                                          for sn in w.sessions.values())]
+    title = name or (titled[0].label if len(titled) == 1 else
+                     mappings[0][0].get("NAME") if len(mappings) == 1 else
                      (folders[0].get("NAME") if folders and folders[0] is not root else "powercenter"))
     pipeline = Pipeline.from_dict({"version": 0, "name": _slug(title or "powercenter"), "nodes": imp.b.nodes})
     issues = validate(pipeline)
@@ -1139,6 +1279,46 @@ def import_powercenter(xml: str, mapping: str | list[str] | None = None, name: s
     if bad:
         warnings.append(f"column names that need quoting: {bad}")
     return ImportResult(pipeline, warnings, imp.outputs, card)
+
+
+_TASK_ADVICE = {
+    "command": (MANUAL, "runs shell commands; recreate it as a task in your orchestrator"),
+    "email": (MANUAL, "sends an email; use your orchestrator's notifications"),
+    "decision": (REVIEW, "becomes a branch in your orchestrator"),
+    "assignment": (REVIEW, "sets workflow variables; pass them as pipeline parameters"),
+    "timer": (MANUAL, "waits for a time; use your orchestrator's schedule or sensors"),
+    "event wait": (MANUAL, "waits for an event or file; use your orchestrator's sensors"),
+    "event raise": (MANUAL, "raises an event; use your orchestrator's triggers"),
+    "control": (MANUAL, "stops or fails the workflow; use your orchestrator's failure handling"),
+    "worklet": (MANUAL, "worklets aren't expanded yet"),
+}
+
+
+def _workflow_items(imp: "_Importer", wf: Workflow, sessions: dict[str, Session]) -> None:
+    """A workflow is orchestration: its order is noted, and tasks that aren't sessions are graded."""
+    steps = []
+    for t in wf.order:
+        if t in wf.sessions:
+            sess = sessions.get(wf.sessions[t])
+            steps.append(f"{sess.label} (runs {sess.mapping.lower()})" if sess else t)
+        elif t in wf.tasks and wf.tasks[t].type.lower() != "start":
+            steps.append(wf.tasks[t].label)
+    item = ScoreItem(wf.label, "Workflow", area="orchestration")
+    item.flag(REVIEW, "Redcliff builds pipelines, not schedules: recreate this run order in your orchestrator: "
+                      + " → ".join(steps))
+    for cond in wf.conditions:
+        item.flag(REVIEW, f"link condition: {cond}")
+    imp.items.append(item)
+    for t in wf.order:
+        task = wf.tasks.get(t)
+        if task is None or task.type.lower() in ("start", "start task"):
+            continue
+        status, advice = _TASK_ADVICE.get(task.type.lower(), (MANUAL, "has no pipeline equivalent"))
+        ti = ScoreItem(f"{wf.label}/{task.label}", task.type, area="orchestration")
+        ti.flag(status, f"{task.type} task {advice}")
+        for d in task.detail:
+            ti.flag(status, d)
+        imp.items.append(ti)
 
 
 def mapping_names(xml: str) -> list[str]:

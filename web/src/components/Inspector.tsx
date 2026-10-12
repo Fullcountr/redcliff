@@ -443,6 +443,15 @@ function Ring({ card }: { card: Scorecard }) {
   );
 }
 
+function describe(card: Scorecard, source: string): string {
+  const tasks = card.items.filter((i) => i.area === "orchestration").length;
+  const unit = card.origin === "powercenter" ? "instances" : "statements";
+  const steps = card.items.length - tasks;
+  return tasks
+    ? `${steps} ${unit} and ${tasks} workflow ${tasks === 1 ? "task" : "tasks"} from ${source}`
+    : `${steps} ${unit} from ${source}`;
+}
+
 function MigrationPanel({ scorecard: card, activeItem, onPickItem, onTab, onSelectStep }: Props & { scorecard: Scorecard }) {
   const [filter, setFilter] = useState<"all" | ScoreStatus>("all");
   const order: Record<ScoreStatus, number> = { manual: 0, review: 1, converted: 2 };
@@ -455,6 +464,9 @@ function MigrationPanel({ scorecard: card, activeItem, onPickItem, onTab, onSele
     const lines = [`# Migration scorecard: ${card.title}`, "",
       `${card.counts.converted} of ${card.items.length} converted automatically (${Math.round(card.automated * 100)}%), ` +
       `${card.counts.review} to review, ${card.counts.manual} to rewrite by hand.`,
+      ...(card.items.some((i) => i.area === "orchestration")
+        ? [`${card.items.filter((i) => i.area === "orchestration").length} of the ${card.items.length} are workflow tasks, which belong in an orchestrator rather than a pipeline.`]
+        : []),
       `Lineage: ${lin.traced} of ${lin.columns} target columns trace back to a source.`, "",
       "| Status | Name | Type | Became | Notes |", "| --- | --- | --- | --- | --- |",
       ...[...card.items].sort((a, b) => order[a.status] - order[b.status]).map((i) =>
@@ -473,7 +485,7 @@ function MigrationPanel({ scorecard: card, activeItem, onPickItem, onTab, onSele
           <Ring card={card} />
           <div className="score-text">
             <h2>{card.title}</h2>
-            <p>{card.items.length} {card.origin === "powercenter" ? "instances" : "statements"} from {source}</p>
+            <p>{describe(card, source)}</p>
             <div className="score-legend">
               <span className="chip ok">{card.counts.converted} converted</span>
               <span className="chip warn">{card.counts.review} review</span>

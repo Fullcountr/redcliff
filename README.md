@@ -355,7 +355,9 @@ right-hand copy, Redcliff renames that copy before the join, so no value is lost
 | Union | `select` per group, then `union` |
 | Sorter, Update Strategy | nothing, or a distinct `aggregate`, or a `filter` that drops rejected rows |
 | Sequence Generator | `ROW_NUMBER()`, flagged for review |
-| Mapplets, Normalizer, Java and others | a typed placeholder, flagged as manual |
+| Mapplet | its transformations, inlined (nested mapplets too) |
+| Session, parameter file, workflow | overrides applied, truncate and pre/post SQL carried to the target, `$$PARAMS` resolved, run order and tasks graded |
+| Normalizer, Java and others | a typed placeholder, flagged as manual |
 
 The expression language (`IIF`, `DECODE`, `TO_DATE`, `ADD_TO_DATE`, `$$PARAMS` and about 50
 more) is translated with PowerCenter's semantics where SQL differs. A folder export becomes one
@@ -367,7 +369,7 @@ pipeline, connected through the tables its mappings write and read. The full lis
 | Command | Does |
 | --- | --- |
 | `redcliff import FILE.sql --dialect D [--schema S] -o pipeline.yaml` | SQL to spec |
-| `redcliff import MAPPING.xml [--mapping NAME] [--scorecard report.md] -o pipeline.yaml` | PowerCenter export to spec, with a scorecard |
+| `redcliff import EXPORT.xml [--params FILE.par] [--mapping NAME] [--scorecard report.md] -o pipeline.yaml` | PowerCenter export (mappings, mapplets, sessions, workflows) to spec, with a scorecard |
 | `redcliff validate pipeline.yaml` | structure plus column-level checks |
 | `redcliff compile pipeline.yaml --to spark\|pyspark\|duckdb [--node ID]` | generate code |
 | `redcliff lineage pipeline.yaml [--column N.C \| --impact N.C \| --openlineage N]` | lineage |
@@ -409,7 +411,7 @@ flowchart LR
 | Compiler | generated DuckDB SQL runs on sample data and must match rows worked out by hand |
 | Lineage | each example's column map compared against one worked out by hand |
 | Importer | the original SQL and the imported, recompiled pipeline must return identical rows |
-| PowerCenter | the sample mapping runs in DuckDB and must match rows worked out by hand; every transformation type and scorecard status has a test |
+| PowerCenter | the sample mapping runs in DuckDB and must match rows worked out by hand; the same job rebuilt with a mapplet, session, workflow and parameter file must return identical rows; every transformation type and scorecard status has a test |
 | Expressions | each Informatica expression runs in DuckDB and must return PowerCenter's answer |
 | CLI | a legacy Teradata job goes through import, validate, compile, lineage and run |
 | Spark | generated Spark SQL and PySpark run on real Spark and must match DuckDB, row for row; Informatica expressions too |
@@ -459,7 +461,7 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 - [x] Command line
 - [x] Browser playground with previews and share links
 - [x] Informatica PowerCenter XML importer, with a migration scorecard
-- [ ] Mapplet expansion and session/workflow import (pre/post SQL, parameter files)
+- [x] Mapplet expansion and session/workflow import (pre/post SQL, parameter files)
 - [x] Spark SQL and PySpark run against real Spark in CI
 - [ ] Row-level trace: click an output row, see the input rows behind it
 - [ ] MCP server, so AI agents can edit pipelines and show a diff before you accept

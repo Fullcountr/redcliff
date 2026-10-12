@@ -188,6 +188,22 @@
                       "overwrite",
                       "append"
                     ]
+                  },
+                  "pre_sql": {
+                    "type": "array",
+                    "description": "SQL statements run before writing, on the target platform",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "post_sql": {
+                    "type": "array",
+                    "description": "SQL statements run after writing, on the target platform",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
                   }
                 }
               }

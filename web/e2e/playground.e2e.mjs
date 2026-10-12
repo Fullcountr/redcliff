@@ -196,13 +196,29 @@ await step("importing a PowerCenter mapping shows its migration scorecard", asyn
   await page.mouse.move(5, 5);
 });
 
+await step("a PowerCenter workflow imports with its mapplet, session and parameter file", async () => {
+  await page.locator(".topbar").getByRole("button", { name: "Examples" }).click();
+  await page.getByRole("menuitem", { name: /PowerCenter workflow/ }).click();
+  await page.waitForSelector("dialog[open]");
+  assert.match(await page.locator('textarea[aria-label="Parameter file"]').inputValue(), /\$\$MIN_ORDER_DATE=2026-09-02/);
+  await page.locator("dialog").getByRole("button", { name: "Import", exact: true }).click();
+  await page.waitForSelector("dialog[open]", { state: "detached" });
+  await page.waitForSelector('.react-flow__node[data-id="mplt_clean__exp_clean_customer"]');
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="agg_region_month"] .step-rows')?.textContent === "2 rows", null, { timeout: 30000 });
+  assert.match(await page.locator('.react-flow__node[data-id="region_monthly_revenue"]').innerText(), /post-SQL/);
+  const items = await page.locator(".score-item .name").allTextContents();
+  assert.ok(items.includes("MPLT_CLEAN/EXP_CLEAN_CUSTOMER"), items.join(", "));
+  assert.ok(items.includes("wf_customer_revenue/cmd_check_landing"), items.join(", "));
+  await shot(page, "13-workflow");
+});
+
 await step("a share link restores the pipeline", async () => {
   await page.getByRole("button", { name: "Share link" }).click();
   await page.waitForFunction(() => location.hash.startsWith("#p="));
   const link = page.url();
   const fresh = await context.newPage();
   await fresh.goto(link);
-  await fresh.waitForSelector('.react-flow__node[data-id="agg_region_month"]', { timeout: 120000 });
+  await fresh.waitForSelector('.react-flow__node[data-id="mplt_clean__exp_clean_customer"]', { timeout: 120000 });
   assert.equal(await fresh.locator(".react-flow__node").count(), 19);
   await fresh.close();
 });

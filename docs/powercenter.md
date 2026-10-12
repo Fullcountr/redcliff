@@ -16,6 +16,23 @@ scorecard written to scorecard.md
 The playground does the same: **Import → Informatica PowerCenter**. Nothing is uploaded; the
 XML is parsed in your browser tab.
 
+Exports with **mapplets, sessions, workflows and a parameter file** import too:
+
+```text
+$ redcliff import wf_customer_revenue.xml --params wf_customer_revenue.par -o pipeline.yaml
+imported 19 nodes (2 targets) to pipeline.yaml
+...
+scorecard: 11 of 17 converted (65%), 4 to review, 2 to rewrite by hand
+```
+
+That example ([`wf_customer_revenue.xml`](../examples/legacy/powercenter/wf_customer_revenue.xml)
+and [`.par`](../examples/legacy/powercenter/wf_customer_revenue.par)) is the same job built the way
+real estates are: the cleanup lives in a mapplet, the order date comes from the parameter file, a
+session truncates one target and analyzes it afterwards, and a workflow runs the session between a
+file check and an email. Its pipeline returns exactly the rows of the plain mapping, in DuckDB and
+on Spark. Three of the 17 scorecard items are workflow tasks (the run order, a shell command, an
+email), which belong in an orchestrator; without them it's the same 12 of 14.
+
 The example above is [`examples/legacy/powercenter/m_customer_revenue.xml`](../examples/legacy/powercenter/m_customer_revenue.xml),
 an invented mapping. The test suite runs its converted pipeline in DuckDB and compares the rows
 with answers worked out by hand.
@@ -53,7 +70,25 @@ playground's Migration tab.
 | Sequence Generator | a `ROW_NUMBER()` column where it's used | **review**: numbers restart every run |
 | Transaction Control | nothing | rows pass through |
 | Target Definition | `select` of the connected ports + `target` | `mode: append`, since PowerCenter inserts; unconnected target columns are noted |
-| Mapplet, Normalizer, Java, Stored Procedure, unconnected Lookup, anything else | a placeholder step | **manual** |
+| Mapplet | its transformations, inlined | named `MAPPLET/TRANSFORMATION` on the scorecard and `mapplet__transformation` in the spec; nested mapplets too |
+| Normalizer, Java, Stored Procedure, unconnected Lookup, anything else | a placeholder step | **manual** |
+
+## Sessions, workflows and parameter files
+
+| PowerCenter | Becomes |
+| --- | --- |
+| Session attribute overrides (SQL Query, Source Filter, User Defined Join, lookup overrides, ...) | applied over the mapping, and noted on the transformation |
+| Truncate target table option | the target's `mode: overwrite` (otherwise `append`) |
+| Target Pre SQL / Post SQL | the target's `pre_sql` / `post_sql`, translated from the target database's dialect; Spark SQL and PySpark run them |
+| Source qualifier Pre SQL / Post SQL | **review**: it runs on the source database, which Redcliff doesn't touch |
+| Parameter file | `$$PARAMS` resolved per session (`[folder.WF:wf.ST:session]` beats `[folder.WF:wf]` beats `[Global]`), in expressions and in SQL text; each use is **review**, because the value is baked in |
+| Workflow | sets the order of its sessions' mappings; the run order and link conditions are noted (**review**: recreate them in your orchestrator) |
+| Command, Email, Timer, Event Wait/Raise, Control tasks | **manual**, with the command, address or condition in the note |
+| Decision, Assignment tasks | **review** |
+
+A mapping run by several sessions gets the first session's overrides (in workflow order), with a
+note. A `$$PARAM` used in SQL with no value anywhere makes that transformation **manual**: pass the
+parameter file with `--params` (or in the playground's import dialog).
 
 A folder export with several mappings becomes **one pipeline**. When one mapping reads a table
 another one writes, Redcliff connects them, so lineage runs across the whole folder. Use
@@ -87,9 +122,8 @@ trim sets), `UPPER`, `LOWER`, `LENGTH`, `INSTR`, `LPAD`, `RPAD`, `REPLACESTR`, `
 
 ## Not yet
 
-- Mapplets aren't expanded; their outputs become placeholders.
-- Sessions and workflows (pre/post SQL, truncate target, parameter files) aren't read; only
-  mappings are.
+- Worklets aren't expanded, and reusable session configurations (config objects) aren't read.
+- Connection objects and `$PM...` built-in variables are ignored.
 - Rank, Normalizer, Java, Stored Procedure and SQL transformations have no step type yet.
 
 Found a mapping that imports badly? Please open an issue with a small, **invented** export that

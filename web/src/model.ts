@@ -31,7 +31,9 @@ export type Analysis = {
 export type Impact = { column: string; values: string[]; rows: string[]; breaks: string[] };
 
 export type ScoreStatus = "converted" | "review" | "manual";
-export type ScoreItem = { name: string; kind: string; status: ScoreStatus; nodes: string[]; notes: string[] };
+export type ScoreItem = {
+  name: string; kind: string; status: ScoreStatus; nodes: string[]; notes: string[]; area?: "pipeline" | "orchestration";
+};
 export type Scorecard = {
   origin: "powercenter" | "sql";
   title: string;
@@ -61,8 +63,11 @@ export function summarize(step: Step): string {
   switch (step.type) {
     case "source":
       return String(p.format === "table" ? p.table : p.path ?? "");
-    case "target":
-      return `write ${String(p.format === "table" ? p.table : p.path ?? "")}`;
+    case "target": {
+      const hooks = [p.pre_sql && "pre-SQL", p.post_sql && "post-SQL"].filter(Boolean).join(", ");
+      const how = p.mode === "append" ? "append to" : "write";
+      return `${how} ${String(p.format === "table" ? p.table : p.path ?? "")}${hooks ? ` + ${hooks}` : ""}`;
+    }
     case "filter":
       return String(p.condition ?? "");
     case "join":
