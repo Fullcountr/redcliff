@@ -29,3 +29,12 @@ export function layout(spec: Spec, columns: Record<string, string[]>): Record<st
   }
   return out;
 }
+
+/** Room around the canvas for the top bar, the inspector and the status bar, so fitting never hides a card. */
+export function fitPadding() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  if (w <= 900) return { top: "72px", right: "24px", bottom: `${Math.round(h * 0.46) + 40}px`, left: "24px" } as const;
+  const inspector = w <= 1100 ? 350 : 400;
+  return { top: "112px", right: `${inspector + 48}px`, bottom: "72px", left: "72px" } as const;
+}

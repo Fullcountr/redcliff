@@ -14,7 +14,7 @@ import { Inspector, type Tab } from "./components/Inspector";
 import { ModelView, type ModelTab } from "./components/ModelView";
 import { StepNode, type StepNodeType } from "./components/StepNode";
 import { Variables } from "./components/Variables";
-import { layout } from "./layout";
+import { fitPadding, layout } from "./layout";
 import { fromImpact, trace, type Highlight } from "./lineage";
 import {
   defaultParams, refParts, type Analysis, type DataModel, type Impact, type ImportResult, type Scorecard, type ScoreStatus,
@@ -46,13 +46,6 @@ const EXAMPLES: Record<string, string> = {
 };
 
 /** Fit the pipeline into the part of the canvas the floating bar and inspector leave free. */
-function fitPadding() {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  if (w <= 900) return { top: "72px", right: "24px", bottom: `${Math.round(h * 0.46) + 40}px`, left: "24px" } as const;
-  const inspector = w <= 1100 ? 350 : 400;
-  return { top: "112px", right: `${inspector + 48}px`, bottom: "72px", left: "72px" } as const;
-}
 
 function uniqueId(spec: Spec, base: string): string {
   const taken = new Set(spec.nodes.map((n) => n.id));

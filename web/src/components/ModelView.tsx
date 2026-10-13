@@ -14,6 +14,7 @@ import { memo, useEffect, useMemo, useState } from "react";
 import { data } from "../engine/data";
 import { engine } from "../engine/engine";
 import type { DataModel, EntityKind, JobMap, ModelAnalysis, ModelEntity, ModelExport, Spec } from "../model";
+import { fitPadding } from "../layout";
 import { highlight } from "../ui";
 
 export type ModelTab = "overview" | "load" | "export" | "yaml" | "import";
@@ -158,7 +159,7 @@ function ModelCanvas({ model, engineReady, dataReady, tab, onTab, onChange, onOp
   }, [model, engineReady]);
 
   useEffect(() => {
-    const id = window.setTimeout(() => flow.fitView({ padding: 0.15, maxZoom: 1, duration: 250 }), 60);
+    const id = window.setTimeout(() => flow.fitView({ padding: fitPadding(), maxZoom: 1, duration: 250 }), 60);
     return () => window.clearTimeout(id);
   }, [positions, flow]);
 
@@ -209,6 +210,7 @@ function ModelCanvas({ model, engineReady, dataReady, tab, onTab, onChange, onOp
           onPaneClick={() => setSelected(null)}
           nodesConnectable={false}
           fitView
+          fitViewOptions={{ padding: fitPadding(), maxZoom: 1 }}
           minZoom={0.1}
           proOptions={{ hideAttribution: true }}
         >
@@ -219,7 +221,7 @@ function ModelCanvas({ model, engineReady, dataReady, tab, onTab, onChange, onOp
         <button className="btn ghost icon" onClick={() => flow.zoomIn({ duration: 150 })} aria-label="Zoom in"><Plus /></button>
         <button className="btn ghost icon" onClick={() => flow.zoomOut({ duration: 150 })} aria-label="Zoom out"><Minus /></button>
         <div className="zoom-sep" />
-        <button className="btn ghost icon" onClick={() => flow.fitView({ padding: 0.15, maxZoom: 1, duration: 250 })}
+        <button className="btn ghost icon" onClick={() => flow.fitView({ padding: fitPadding(), maxZoom: 1, duration: 250 })}
           aria-label="Fit to screen" title="Fit to screen"><Maximize /></button>
       </div>
       <aside className="inspector" aria-label="Model">

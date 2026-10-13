@@ -39,7 +39,7 @@ this page. Stop at whichever layer answers your question:
 | [Surface: try it](#surface-try-it-in-a-minute) | see it work in about a minute |
 | [Topsoil: what it does](#topsoil-what-redcliff-does) | know what you'd use it for |
 | [Sediment: a tour of a real migration](#sediment-a-tour-of-a-real-migration) | watch a legacy job become a pipeline, step by step |
-| [Strata: the pieces](#strata-the-pieces) | understand the spec, lineage and importer |
+| [Strata: the pieces](#strata-the-pieces) | understand the spec, the data model, lineage, the importers and the editor tools |
 | [Bedrock: how it's built and tested](#bedrock-how-its-built-and-tested) | trust it, or contribute to it |
 
 ---
@@ -77,6 +77,8 @@ redcliff import examples/legacy/teradata_revenue.sql --dialect teradata \
 redcliff lineage pipeline.yaml --impact orders.status
 redcliff import examples/legacy/powercenter/m_customer_revenue.xml \
   -o mapping.yaml --scorecard scorecard.md
+redcliff model propose examples/legacy/powercenter/m_customer_revenue.xml -o model.yaml
+redcliff model pipeline model.yaml -o load.yaml   # the pipeline that loads the model
 ```
 
 To work on Redcliff itself, install from the clone instead: `pip install -e "core[dev]"`.
@@ -141,6 +143,23 @@ no lock-in: it's your code in your repo.
 DuckDB inside your browser, and runs its data quality expectations. Click a row to see exactly which source rows are behind it. Drop in
 your own CSV files to try your own data. Share the whole
 pipeline as a link; there is no server to store it on.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**Design the data model, separately.** A `model.yaml` describes the tables you want, Kimball
+dimensions and facts or Data Vault 2.0 hubs, links and satellites, apart from any pipeline.
+Redcliff proposes one from your files or from a legacy job, with the reason for every choice,
+and generates the pipeline that loads it: SCD2 history, point-in-time lookups, hash keys.
+
+</td>
+<td valign="top">
+
+**Work where you already are.** A **VS Code extension** shows the canvas, lineage and problems
+beside the YAML. A **pull request bot** posts what each change does to steps, columns and rows.
+An **MCP server** lets AI agents read and edit pipelines, with a diff you accept first.
 
 </td>
 </tr>
@@ -315,6 +334,58 @@ Expressions are plain SQL. Inside a join, each side is named by its step id. The
 including the validator's rules and a JSON Schema for editor autocomplete, is in
 [`docs/spec.md`](docs/spec.md).
 
+### The data model
+
+The data model is a component of its own: a `model.yaml` that names the tables a warehouse should
+have, their keys and how they relate. It is a separate spec from the pipelines, so one model can
+be fed by many pipelines, reviewed on its own, and checked against the loaded tables.
+
+```yaml
+# examples/models/sales.yaml (excerpt)
+style: kimball
+entities:
+  - id: dim_customer
+    kind: dimension            # SCD2 by default: every version kept
+    source: ../data/customers.csv
+    attributes:
+      - {name: customer_key, type: bigint, role: surrogate_key}
+      - {name: customer_id, type: bigint, role: business_key, source: id}
+      - {name: email, type: varchar, history: scd1, source: "LOWER(TRIM(email))"}
+  - id: fct_orders
+    kind: fact
+    grain: one order (order_id)
+    ...
+relationships:
+  - {from: fct_orders.customer_key, to: dim_customer.customer_key}
+```
+
+| You have | Redcliff gives you |
+| --- | --- |
+| CSV or Parquet files | `redcliff model propose a.csv b.csv`: keys, references and measures found by profiling, with the reason for each |
+| a legacy job | `redcliff model propose job.xml`: keys and measures from what the job joins, looks up, merges and sums; `redcliff model map` shows how much of the job a model covers |
+| SQL DDL or DBML | `redcliff model import tables.sql` |
+| a model | `redcliff model pipeline` generates its load (SCD2 dimensions, point-in-time facts, Data Vault hubs, links and satellites with MD5 hash keys); `redcliff model export` writes DDL for eight dialects, DBML, Mermaid or dbt tests; `redcliff model test` checks the loaded tables |
+
+In the playground, **Examples → Data models** opens the model view: entities as cards, keys and
+history marked, relationships drawn key to key, with Load, Export, YAML and Import tabs. After
+importing a legacy job, **Model it** on its Migration tab proposes a model from it.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/data-model-dark.png">
+  <img src="docs/images/data-model-light.png" alt="The sales data model in the playground: dim_customer (SCD2) and dim_date (SCD1) on the left, fct_orders on the right with its foreign keys, durable key and measure marked, relationships drawn key to key, and the panel showing the model is valid with its two relationships.">
+</picture>
+
+<p align="center"><sub>A Kimball model: each card is an entity with its keys (PK, SK, BK, FK, DK), measures (Σ) and history (SCD1, SCD2).</sub></p>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/model-from-job-dark.png">
+  <img src="docs/images/model-from-job-light.png" alt="A model proposed from the Informatica PowerCenter mapping: dim_customer, dim_region, dim_date and fct_orders, with the panel showing that 13 of 13 columns the job writes come from model attributes, each listed with the source column and attribute behind it.">
+</picture>
+
+<p align="center"><sub>The PowerCenter mapping from the tour above, proposed as a model: every column it writes is traced to a model attribute.</sub></p>
+
+The design, with every decision and its reason, is in [`docs/modeling.md`](docs/modeling.md).
+
 ### Lineage
 
 Redcliff uses [OpenLineage](https://openlineage.io/)'s vocabulary, and exports to its column
@@ -335,6 +406,31 @@ column, including a same-named copy passed down from upstream.
 (or FAIL) events with each target's schema and column lineage, so a catalog such as
 [Marquez](https://marquezproject.ai/) sees every run. Give a file path instead of a URL to append
 the events as JSON lines; set `OPENLINEAGE_API_KEY` for an endpoint that needs a token.
+
+### Reviewing a change
+
+Every edit can be reviewed by what it does, not only by its text. In the playground, the
+**Changes** tab compares the pipeline with how it was loaded: steps changed, the lineage of target
+columns, rows before and after on the sample data, and the spec side by side. `redcliff diff`
+prints the same report, and the [pull request bot](docs/pr-bot.md) posts it on every PR, models
+included.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/changes-dark.png">
+  <img src="docs/images/changes-light.png" alt="The Changes tab after editing the shipped filter from status = 'shipped' to amount > 50: one step changed, the out target has 2 rows before and after with 1 added and 1 removed, and the spec is shown side by side with the changed line highlighted.">
+</picture>
+
+### In your editor
+
+The [VS Code extension](docs/vscode.md) shows the canvas beside the spec you're editing and follows
+it as you type: hover a column for its lineage, click one for its blast radius, click a step or a
+problem to jump to its lines, and read the Spark SQL, PySpark or DuckDB SQL it compiles to.
+Problems are underlined in the YAML. It runs `redcliff bridge`, the same engine as the CLI.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/vscode-dark.png">
+  <img src="docs/images/vscode-light.png" alt="The VS Code extension's canvas in a dark theme: the orders_revenue pipeline with the revenue column's lineage traced back to orders.amount, and the Code tab showing the generated Spark SQL.">
+</picture>
 
 ### The SQL importer
 
@@ -439,8 +535,11 @@ of guessing. See [`docs/datastage.md`](docs/datastage.md).
 
 ```mermaid
 flowchart LR
-  canvas[Canvas] --> spec
-  importer[SQL and PowerCenter<br/>importers] --> spec
+  canvas[Canvas<br/>playground, VS Code] --> spec
+  importer[Importers<br/>SQL, PowerCenter, SSIS,<br/>Talend, DataStage] --> spec
+  agents[MCP server<br/>AI agents] --> spec
+  model[(Data model<br/>model.yaml)] -->|generates the load| spec
+  importer -.->|proposes| model
   spec[(Pipeline spec<br/>YAML in Git)] --> compiler[Compiler]
   spec --> lineage[Lineage engine]
   compiler --> code[Spark SQL<br/>PySpark<br/>DuckDB SQL]
@@ -473,6 +572,7 @@ flowchart LR
 | Row trace | tracing never changes a step's rows; every traced target row is rebuilt from only its source rows |
 | Diff | step, column, lineage and row changes for edited examples, worked out by hand; `--git` mode on a scratch repository |
 | MCP | the protocol over real stdio, every tool, and edits: proposed without writing, applied once, refused when stale or broken, untouched steps kept byte for byte |
+| Data models | every model rule, DDL and DBML round trips; proposals from files and from each legacy format; generated Kimball and Data Vault loads run twice in DuckDB and keep history as worked out by hand (SCD2 versions, point-in-time lookups, unknown members), build with dbt and pass the model's own checks |
 | Importer | the original SQL and the imported, recompiled pipeline must return identical rows |
 | PowerCenter | the sample mapping runs in DuckDB and must match rows worked out by hand; the same job rebuilt with a mapplet, session, workflow and parameter file must return identical rows; a store mart with a Normalizer, two Ranks (a tie, a NULL) and a worklet matches rows worked out by hand; every transformation type and scorecard status has a test |
 | Expressions | each Informatica, SSIS, Talend (Java) and DataStage expression runs in DuckDB and must return the original tool's answer |
@@ -489,7 +589,7 @@ flowchart LR
 CI runs all of it on every push, including the browser test and a real Spark: the generated
 Spark SQL (queries and full scripts that write tables) and PySpark scripts run on a local Spark 4
 with its defaults, ANSI mode included, and must return DuckDB's rows for every example, the
-imported Teradata job and the imported PowerCenter exports.
+imported Teradata job, and the imported PowerCenter, SSIS, Talend and DataStage jobs.
 
 ### Repository layout
 
