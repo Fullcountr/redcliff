@@ -638,6 +638,40 @@ def cmd_model(args) -> int:
     return 0
 
 
+# What editor integrations may call: the browser engine's functions that take spec text and return
+# JSON. None of them read or write files, so the bridge needs no confinement.
+BRIDGE_FUNCTIONS = ("analyze", "code", "impact", "diff", "model_analyze", "model_export")
+
+
+def cmd_bridge(args) -> int:
+    """JSON lines over stdio for editor extensions: {"id", "fn", "args"} in, {"id", "result"} out."""
+    from redcliff import __version__, web
+
+    sys.stdout.write(json.dumps({"ready": True, "version": __version__}) + "\n")
+    sys.stdout.flush()
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            request = json.loads(line)
+            rid, fn, call_args = request.get("id"), request.get("fn"), request.get("args") or []
+        except (json.JSONDecodeError, AttributeError):
+            sys.stdout.write(json.dumps({"id": None, "result": {"ok": False, "error": "not a JSON request"}}) + "\n")
+            sys.stdout.flush()
+            continue
+        if fn not in BRIDGE_FUNCTIONS or not hasattr(web, fn):
+            result = {"ok": False, "error": f"unknown function {fn!r}"}
+        else:
+            try:
+                result = json.loads(getattr(web, fn)(*call_args))
+            except TypeError as e:
+                result = {"ok": False, "error": f"bad arguments for {fn}: {e}"}
+        sys.stdout.write(json.dumps({"id": rid, "result": result}) + "\n")
+        sys.stdout.flush()
+    return 0
+
+
 def cmd_mcp(args) -> int:
     from redcliff.mcp import serve
 
@@ -750,6 +784,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mapping", action="append", help="propose/map from PowerCenter: only this mapping (repeatable)")
     p.add_argument("-o", "--output", help="write to this file instead of printing")
     p.set_defaults(func=cmd_model)
+
+    p = sub.add_parser("bridge", help="JSON lines over stdio for editor extensions (the VS Code extension uses it)")
+    p.set_defaults(func=cmd_bridge)
 
     p = sub.add_parser("mcp", help="run an MCP server over stdio, so AI agents can read and edit pipelines")
     p.add_argument("--root", default=".", help="the folder whose specs agents may read and edit (default: here)")

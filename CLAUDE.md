@@ -37,5 +37,6 @@ Each node has: id, type, inputs (node ids), params. Expressions are SQL strings.
 ## Layout
 
 - `core/src/redcliff/`: the Python package. Tests in `core/tests/`.
-- `web/`: Vite + React + TypeScript app.
+- `web/`: Vite + React + TypeScript app (`npm run build:vscode` builds the VS Code webview).
+- `vscode/`: the VS Code extension; it runs `redcliff bridge`. `npm test` and `npm run build` there.
 - `examples/`, `docs/`, `spikes/`: see README.

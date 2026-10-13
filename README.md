@@ -430,6 +430,7 @@ of guessing. See [`docs/datastage.md`](docs/datastage.md).
 | `redcliff trace pipeline.yaml STEP [--where COND]` | row-level trace: each row of a step with the source rows behind it |
 | `redcliff diff old.yaml new.yaml [--data]` or `redcliff diff --git REF` | what a change does: steps, columns, lineage and rows ([details](docs/pr-bot.md)) |
 | `redcliff model propose\|map\|pipeline\|test\|export\|import ...` | data models: propose one from data files or a legacy job, map a job onto one, generate and check its load ([details](docs/modeling.md#commands-m1)) |
+| `redcliff bridge` | JSON lines over stdio for editor extensions; the [VS Code extension](docs/vscode.md) runs it |
 | `redcliff mcp --root .` | an MCP server, so AI agents can read and edit pipelines, with a diff you accept first ([details](docs/mcp.md)) |
 
 ---
@@ -482,7 +483,8 @@ flowchart LR
 | Spark | generated Spark SQL and PySpark run on real Spark and must match DuckDB, row for row; Informatica expressions too |
 | dbt | every example becomes a dbt project, `dbt build` runs it with dbt-duckdb (seeds, hooks, file targets) and every target must match DuckDB |
 | Lakeflow | every example becomes a Lakeflow Declarative Pipeline, `spark-pipelines run` runs it on local Spark and every materialized view must match DuckDB |
-| Browser | headless Chromium drives the real app: boot, hover, blast radius, SQL and PowerCenter import, scorecard, preview, edit, the Changes tab, share, data models, phone layout; after every deploy it runs again against the live site |
+| Browser | headless Chromium drives the real app: boot, hover, blast radius, SQL, PowerCenter, SSIS, Talend and DataStage import, scorecard, preview, edit, the Changes tab, share, data models, phone layout; after every deploy it runs again against the live site |
+| VS Code | the webview in Chromium against a real `redcliff bridge`, and the extension in a real VS Code: the panel opens, problems appear on the right step and clear when fixed |
 
 CI runs all of it on every push, including the browser test and a real Spark: the generated
 Spark SQL (queries and full scripts that write tables) and PySpark scripts run on a local Spark 4
@@ -495,6 +497,7 @@ imported Teradata job and the imported PowerCenter exports.
 | --- | --- |
 | [`core/`](core) | the Python package: spec, compiler, lineage, row trace, diff, importers, CLI, MCP server, browser bridge |
 | [`web/`](web) | the playground: React, React Flow, Pyodide worker, DuckDB-Wasm |
+| [`vscode/`](vscode) | the VS Code extension: the playground's canvas beside the spec ([details](docs/vscode.md)) |
 | [`examples/`](examples) | sample data, example pipelines, a legacy Teradata job, three PowerCenter exports, an SSIS package, a Talend job and a DataStage export |
 | [`docs/`](docs) | spec reference, architecture notes, importer guides (SQL, PowerCenter, SSIS, Talend, DataStage), outputs, the pull request bot, the MCP server, releasing |
 | [`action.yml`](action.yml) | the pull request bot as a GitHub Action |
@@ -542,6 +545,7 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 - [x] SSIS package (`.dtsx`) importer, with a scorecard
 - [x] Talend job (`.item`) importer, with a scorecard ([details](docs/talend.md))
 - [x] IBM DataStage parallel job (`.dsx` and XML) importer, with a scorecard ([details](docs/datastage.md))
+- [x] VS Code extension: the canvas, lineage and problems next to the spec file ([details](docs/vscode.md))
 - [x] `pip install redcliff` from PyPI, released by a tag-triggered workflow
 - [x] OpenLineage run events from `redcliff run`, so a catalog such as Marquez sees each run with its column lineage
 - [x] A Changes tab in the playground: a side-by-side diff, the same report the pull request bot posts
@@ -564,7 +568,7 @@ adjust it on the canvas, and the pipelines that load it are generated from it.
 
 ### Also next
 
-- [ ] VS Code extension: the canvas and lineage next to the spec file
+- [ ] Ideas welcome: open an issue
 
 ---
 

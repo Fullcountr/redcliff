@@ -39,8 +39,28 @@ jobs:
           name: dist
           path: core/dist/
 
+  vsix:
+    # The VS Code extension, versioned with the package.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: The tag matches the extension version
+        run: |
+          version=$(node -p "require('./vscode/package.json').version")
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "::error::tag $GITHUB_REF_NAME but vscode/package.json says $version"; exit 1; }
+      - run: |
+          cd web && npm ci && npm run build:vscode
+          cd ../vscode && npm ci && npm test && npm run build && npm run package
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vsix
+          path: vscode/redcliff.vsix
+
   pypi:
-    needs: build
+    needs: [build, vsix]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -64,7 +84,32 @@ jobs:
         with:
           name: dist
           path: dist/
+      - uses: actions/download-artifact@v8
+        with:
+          name: vsix
+          path: dist/
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+
+  marketplace:
+    # Publishes the extension when the repository has the tokens; skipped otherwise.
+    # VSCE_PAT: an Azure DevOps token for the `fullcountr` publisher; OVSX_PAT: an Open VSX token.
+    needs: github-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v8
+        with:
+          name: vsix
+          path: .
+      - name: Publish
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -n "$VSCE_PAT" ]; then npx --yes @vscode/vsce publish --packagePath redcliff.vsix -p "$VSCE_PAT"; else echo "no VSCE_PAT: skipping the VS Code Marketplace"; fi
+          if [ -n "$OVSX_PAT" ]; then npx --yes ovsx publish redcliff.vsix -p "$OVSX_PAT"; else echo "no OVSX_PAT: skipping Open VSX"; fi

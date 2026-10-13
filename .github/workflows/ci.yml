@@ -74,3 +74,36 @@ jobs:
           npx vite preview --port 4173 --strictPort &
           for i in $(seq 1 60); do curl -sf http://localhost:4173/ > /dev/null && break; sleep 1; done
           APP_URL=http://localhost:4173/ node e2e/playground.e2e.mjs
+
+  vscode:
+    # The VS Code extension: its helpers, its webview in Chromium against a real `redcliff bridge`,
+    # the extension itself in a real VS Code, and the .vsix.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - run: pip install "./core"
+      - name: Build the webview and the extension
+        run: |
+          cd web && npm ci && npm run build:vscode
+          cd ../vscode && npm ci && npx tsc -p . && npm test && npm run build
+      - name: Webview end-to-end test
+        working-directory: web/e2e
+        run: |
+          npm ci && npx playwright-core install --with-deps chromium
+          node vscode-webview.e2e.mjs
+      - name: Extension test in VS Code
+        working-directory: vscode
+        run: xvfb-run -a npm run test:vscode
+      - name: Package
+        working-directory: vscode
+        run: npm run package
+      - uses: actions/upload-artifact@v7
+        with:
+          name: redcliff-vsix
+          path: vscode/redcliff.vsix

@@ -171,3 +171,30 @@ def test_version(capsys):
     with pytest.raises(SystemExit):
         main(["--version"])
     assert capsys.readouterr().out.strip() == f"redcliff {redcliff.__version__}"
+
+
+def test_bridge_answers_json_lines():
+    import subprocess
+    import sys
+
+    spec = (ROOT / "examples" / "specs" / "orders_revenue.yaml").read_text()
+    import yaml
+
+    data = yaml.safe_load(spec)
+    requests = [
+        {"id": 1, "fn": "analyze", "args": [json.dumps(data)]},
+        {"id": 2, "fn": "code", "args": [json.dumps(data), "spark", None]},
+        {"id": 3, "fn": "open", "args": ["/etc/passwd"]},
+        {"id": 4, "fn": "impact", "args": [json.dumps(data)]},
+    ]
+    done = subprocess.run([sys.executable, "-m", "redcliff.cli", "bridge"],
+                          input="".join(json.dumps(r) + "\n" for r in requests) + "not json\n",
+                          capture_output=True, text=True, timeout=60)
+    lines = [json.loads(line) for line in done.stdout.splitlines()]
+    assert lines[0]["ready"] is True
+    replies = {r["id"]: r["result"] for r in lines[1:]}
+    assert replies[1]["ok"] and "revenue_by_region" in replies[1]["columns"]
+    assert replies[2]["ok"] and "WITH" in replies[2]["code"]
+    assert replies[3] == {"ok": False, "error": "unknown function 'open'"}
+    assert not replies[4]["ok"] and "missing" in replies[4]["error"]
+    assert replies[None]["error"] == "not a JSON request"

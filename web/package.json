@@ -10,7 +10,8 @@
     "prebuild": "npm run engine",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:vscode": "tsc -b && vite build -c vite.vscode.config.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",

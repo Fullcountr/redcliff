@@ -1,0 +1,22 @@
+/* The VS Code webview: the canvas with a panel beside it (or below it when the view is narrow). */
+.vs-root { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr minmax(300px, 34%); }
+.vs-canvas { position: relative; inset: auto; min-width: 0; }
+.vs-zoom { left: 12px; bottom: 12px; }
+.vs-panel {
+  display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  background: var(--surface); border-left: 1px solid var(--line);
+}
+.vs-head { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px 0; font-size: 13px; }
+.vs-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vs-error { margin: 8px 14px 0; font-size: 12px; }
+.vs-body { overflow: auto; }
+.vs-body .code-block { max-height: none; }
+.vs-empty {
+  display: flex; gap: 8px; align-items: center; justify-content: center; height: 100%; padding: 24px;
+  color: var(--text-2); text-align: center;
+}
+.vs-empty svg { width: 16px; height: 16px; flex: none; }
+@media (max-width: 760px) {
+  .vs-root { grid-template-columns: 1fr; grid-template-rows: 1fr minmax(180px, 40%); }
+  .vs-panel { border-left: 0; border-top: 1px solid var(--line); }
+}

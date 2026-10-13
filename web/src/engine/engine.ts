@@ -13,8 +13,17 @@ export const engineReady = new Promise<number>((resolve, reject) => {
   readyReject = reject;
 });
 
+/** Where engine calls go instead of the Pyodide worker: the VS Code extension's Python bridge. */
+type Transport = (fn: string, args: unknown[]) => Promise<unknown>;
+let transport: Transport | null = null;
+
+export function useTransport(t: Transport): void {
+  transport = t;
+  readyResolve(0);
+}
+
 export function startEngine(): void {
-  if (worker) return;
+  if (worker || transport) return;
   worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
   worker.onmessage = (e: MessageEvent) => {
     const msg = e.data;
@@ -26,6 +35,7 @@ export function startEngine(): void {
 }
 
 function call<T>(fn: string, ...args: unknown[]): Promise<Result<T>> {
+  if (transport) return transport(fn, args) as Promise<Result<T>>;
   startEngine();
   const id = nextId++;
   return new Promise((resolve) => {

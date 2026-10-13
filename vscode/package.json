@@ -1,0 +1,94 @@
+{
+  "name": "redcliff",
+  "displayName": "Redcliff",
+  "description": "See a Redcliff pipeline spec as a canvas next to the YAML: column lineage, blast radius, issues and generated Spark code.",
+  "version": "0.2.0",
+  "publisher": "fullcountr",
+  "license": "Apache-2.0",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Fullcountr/redcliff"
+  },
+  "homepage": "https://fullcountr.github.io/redcliff/",
+  "bugs": {
+    "url": "https://github.com/Fullcountr/redcliff/issues"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Data Science",
+    "Linters"
+  ],
+  "keywords": [
+    "etl",
+    "data pipeline",
+    "lineage",
+    "spark",
+    "dbt",
+    "informatica",
+    "migration"
+  ],
+  "activationEvents": [
+    "onLanguage:yaml"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "redcliff.showPipeline",
+        "title": "Show Pipeline Canvas",
+        "category": "Redcliff",
+        "icon": "$(type-hierarchy)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "redcliff.showPipeline",
+          "when": "resourceLangId == yaml && redcliff.isSpec",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "redcliff.showPipeline",
+          "when": "editorLangId == yaml"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Redcliff",
+      "properties": {
+        "redcliff.command": {
+          "type": "string",
+          "default": "redcliff",
+          "markdownDescription": "How to run Redcliff: `redcliff` once `pip install redcliff` has put it on your PATH, a full path to it, or for example `python3 -m redcliff.cli`."
+        },
+        "redcliff.diagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a pipeline spec's problems (unknown columns, broken references) in the editor."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "webview": "cd ../web && npm run build:vscode",
+    "build": "node build.mjs",
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
+    "package": "vsce package --no-dependencies --out redcliff.vsix",
+    "test:vscode": "node test/vscode/run.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/vscode": "~1.85.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.0",
+    "js-yaml": "^5.4.3",
+    "typescript": "~6.0.2"
+  }
+}
