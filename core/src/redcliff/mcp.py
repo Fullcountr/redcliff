@@ -457,6 +457,10 @@ class Server:
 
             if is_talend(text, src.name):
                 return None, import_talend(text, name=src.stem)
+            from redcliff.datastage import import_datastage, is_datastage
+
+            if is_datastage(text, src.name):
+                return None, import_datastage(text)
             if src.suffix.lower() == ".xml" or text.lstrip().startswith("<"):
                 from redcliff.powercenter import import_powercenter
 
@@ -545,10 +549,10 @@ class Server:
             return propose_edit(out, new_spec=dump_spec(pipeline, "yaml"), data=False)
 
         @tool("import_legacy", "Import legacy ETL", "Turn a legacy SQL script, an Informatica PowerCenter XML export, "
-              "an SSIS .dtsx package or a Talend job (.item) "
+              "an SSIS .dtsx package, a Talend job (.item) or a DataStage export (.dsx) "
               "into a pipeline, as a proposal for a new spec file (apply it with apply_edit). PowerCenter imports "
               "come with a migration scorecard.",
-              {"source": {**S, "description": "Path of the .sql, .xml, .dtsx or .item file, relative to the root"},
+              {"source": {**S, "description": "Path of the .sql, .xml, .dtsx, .item or .dsx file, relative to the root"},
                "out": {**S, "description": "Where the new spec goes, e.g. pipelines/orders.yaml"},
                "dialect": {**S, "description": "SQL dialect, e.g. teradata, oracle, tsql"},
                "params": {**S, "description": "PowerCenter parameter file path"}},

@@ -404,10 +404,16 @@ class _Importer:
         if len(tables) == 1 and tables[0].name not in self.b.tables and isinstance(tree, exp.Select):
             outs = tree.expressions
             if len(outs) == len(schema) and all(isinstance(o, exp.Column) for o in outs):
-                self.b.schema.setdefault(tables[0].name, {})
+                declared = self.b.schema.setdefault(tables[0].name, {})
                 for o, c in zip(outs, schema):
-                    self.b.schema[tables[0].name][o.name] = c.sql_type()[0]
-        return self.b.convert_query(tree, {}, label)
+                    declared[o.name] = c.sql_type()[0]
+                for other in tree.find_all(exp.Column):  # filtered on but not selected: type unknown
+                    declared.setdefault(other.name, "TEXT")
+        node = self.b.convert_query(tree, {}, label)
+        if next(n for n in self.b.nodes if n["id"] == node)["type"] == "source":
+            # SELECT a, b FROM t became the table itself; the table may have more columns, so name them
+            node = self.add("select", [node], {"columns": list(self.b.cols[node])}, f"{label}_columns")
+        return node
 
     def c_file_input(self, comp: _Comp) -> None:
         schema = comp.schema()

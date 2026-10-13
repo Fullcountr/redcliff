@@ -1,6 +1,6 @@
 """Legacy jobs and data models: propose a model from what a job does, and map a job onto a model.
 
-An imported job (SQL, PowerCenter, SSIS, Talend or a pipeline spec) knows things about the tables it reads
+An imported job (SQL, PowerCenter, SSIS, Talend, DataStage or a pipeline spec) knows things about the tables it reads
 that a profile of the data can't tell you, and it knows them without any data:
 
 - the columns it joins on, and which side of each join is the one side (a key);

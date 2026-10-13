@@ -115,7 +115,7 @@ entity. `redcliff.propose.to_data_vault` turns the same proposal into hubs, link
 
 A legacy job knows things about its tables that a profile of the data can't tell you, and it knows
 them without any data. `redcliff model propose m_customer_revenue.xml -o model.yaml` imports the job
-(SQL, PowerCenter, SSIS, Talend, or a pipeline spec as it is) and reads:
+(SQL, PowerCenter, SSIS, Talend, DataStage, or a pipeline spec as it is) and reads:
 
 | In the job | Becomes |
 | --- | --- |

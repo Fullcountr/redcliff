@@ -31,6 +31,7 @@ if shutil.which("java") is None and not os.environ.get("JAVA_HOME"):
 from pyspark.sql import SparkSession  # noqa: E402
 
 from redcliff.compile import compile_pyspark, compile_query, compile_script  # noqa: E402
+from redcliff.datastage import import_datastage  # noqa: E402
 from redcliff.importer import import_sql  # noqa: E402
 from redcliff.informatica import translate  # noqa: E402
 from redcliff.powercenter import import_powercenter  # noqa: E402
@@ -175,6 +176,8 @@ PIPELINES = {
         (ROOT / "examples" / "legacy" / "ssis" / "LoadRegionRevenue.dtsx").read_text()).pipeline,
     "talend_order_revenue": lambda: without_merge(import_talend(  # tMap lookups (filtered, inner with rejects)
         (ROOT / "examples/legacy/talend/j_order_revenue.item").read_text(), name="j_order_revenue").pipeline),
+    "datastage_order_revenue": lambda: without_merge(import_datastage(  # transformer, lookup reject, filter, join
+        (ROOT / "examples/legacy/datastage/px_order_revenue.dsx").read_text()).pipeline),
 }
 
 

@@ -175,6 +175,16 @@ def import_talend(xml: str, name: str | None = None) -> dict[str, Any]:
 
 
 @_wrap
+def import_datastage(text: str) -> dict[str, Any]:
+    """A DataStage export (.dsx or XML) in, spec and migration scorecard out."""
+    from redcliff.datastage import import_datastage as _import_datastage
+
+    result = _import_datastage(text)
+    return {"spec": result.pipeline.to_dict(), "warnings": result.warnings, "outputs": result.outputs,
+            "scorecard": result.scorecard.to_dict()}
+
+
+@_wrap
 def impact(spec: Any, node_id: str, column: str) -> dict[str, Any]:
     """Blast radius of one column."""
     graph = build_graph(_load(spec))

@@ -54,7 +54,7 @@ everything runs in the tab and nothing is sent anywhere.
 
 A sample pipeline loads with live row counts. Hover any column. Click one. Then press
 **Import** and pick the legacy Teradata job, the Informatica PowerCenter mapping, the SSIS
-package or the Talend job; each is already filled in.
+package, the Talend job or the DataStage job; each is already filled in.
 
 **Run it yourself:**
 
@@ -101,9 +101,10 @@ step, with a note. Nothing is dropped silently.
 </td>
 <td width="50%" valign="top">
 
-**Import Informatica PowerCenter, SSIS and Talend.** PowerCenter mappings and workflows, SSIS
-packages and Talend jobs become steps: source qualifiers, expressions, joiners, lookups, routers,
-ranks, conditional splits, merge joins, tMaps and more, with each expression language translated
+**Import Informatica PowerCenter, SSIS, Talend and DataStage.** PowerCenter mappings and
+workflows, SSIS packages, Talend jobs and DataStage parallel jobs become steps: source qualifiers,
+expressions, joiners, lookups, routers, ranks, conditional splits, merge joins, tMaps,
+Transformers and more, with each expression language translated
 to SQL that keeps its quirks. A **migration scorecard** grades every transformation: converted, needs review,
 or rewrite by hand, with the reason.
 
@@ -399,6 +400,18 @@ orchestration. Java expressions keep their semantics, such as BigDecimal arithme
 division, and the differences that matter (a null in string `+`) are flagged. See
 [`docs/talend.md`](docs/talend.md).
 
+### The DataStage importer
+
+DataStage parallel jobs (a `.dsx` export, or the same export as XML) import the same way:
+connectors (with their SELECT through the SQL importer), sequential files, Transformers (stage
+variables, derivations, constraints, the otherwise link), Filters, Lookups (continue, drop, reject
+or fail), Joins, Aggregators, Remove Duplicates, Funnels and Copies become steps; a connector's
+write mode and table action become overwrite, append or merge on the link's keys; job parameters
+become pipeline variables; before- and after-job subroutines and sequence jobs are graded as
+orchestration. The `.dsx` format isn't fully published, so this importer follows its public
+structure, is tested on invented exports, and flags any stage option it doesn't recognise instead
+of guessing. See [`docs/datastage.md`](docs/datastage.md).
+
 ### The command line
 
 | Command | Does |
@@ -406,6 +419,7 @@ division, and the differences that matter (a null in string `+`) are flagged. Se
 | `redcliff import FILE.sql --dialect D [--schema S] -o pipeline.yaml` | SQL to spec |
 | `redcliff import PACKAGE.dtsx [--scorecard report.md] -o pipeline.yaml` | SSIS package to spec, with a scorecard ([details](docs/ssis.md)) |
 | `redcliff import JOB.item [--scorecard report.md] -o pipeline.yaml` | Talend job to spec, with a scorecard ([details](docs/talend.md)) |
+| `redcliff import EXPORT.dsx [--scorecard report.md] -o pipeline.yaml` | DataStage parallel jobs to spec, with a scorecard ([details](docs/datastage.md)) |
 | `redcliff import EXPORT.xml [--params FILE.par] [--mapping NAME] [--scorecard report.md] -o pipeline.yaml` | PowerCenter export (mappings, mapplets, sessions, workflows) to spec, with a scorecard |
 | `redcliff validate pipeline.yaml` | structure plus column-level checks |
 | `redcliff compile pipeline.yaml --to spark\|pyspark\|duckdb [--node ID]` | generate code |
@@ -460,9 +474,10 @@ flowchart LR
 | MCP | the protocol over real stdio, every tool, and edits: proposed without writing, applied once, refused when stale or broken, untouched steps kept byte for byte |
 | Importer | the original SQL and the imported, recompiled pipeline must return identical rows |
 | PowerCenter | the sample mapping runs in DuckDB and must match rows worked out by hand; the same job rebuilt with a mapplet, session, workflow and parameter file must return identical rows; a store mart with a Normalizer, two Ranks (a tie, a NULL) and a worklet matches rows worked out by hand; every transformation type and scorecard status has a test |
-| Expressions | each Informatica, SSIS and Talend (Java) expression runs in DuckDB and must return the original tool's answer |
+| Expressions | each Informatica, SSIS, Talend (Java) and DataStage expression runs in DuckDB and must return the original tool's answer |
 | SSIS | the sample package runs in DuckDB, Spark, dbt and Lakeflow and must match rows worked out by hand; each component type, including first-match conditional splits and lookup no-match outputs, has a test |
 | Talend | the sample job runs in DuckDB, Spark, dbt and Lakeflow and must match rows worked out by hand, twice (an insert-or-update keeps rows it didn't see); each component, tMap's lookups, filters and rejects included, has a test |
+| DataStage | the sample job, as `.dsx` and as XML, runs in DuckDB, Spark, dbt and Lakeflow and must match rows worked out by hand, twice; each stage, including first-match filters, lookup reject and fail actions and chained stage variables, has a test |
 | CLI | a legacy Teradata job goes through import, validate, compile, lineage and run |
 | Spark | generated Spark SQL and PySpark run on real Spark and must match DuckDB, row for row; Informatica expressions too |
 | dbt | every example becomes a dbt project, `dbt build` runs it with dbt-duckdb (seeds, hooks, file targets) and every target must match DuckDB |
@@ -480,8 +495,8 @@ imported Teradata job and the imported PowerCenter exports.
 | --- | --- |
 | [`core/`](core) | the Python package: spec, compiler, lineage, row trace, diff, importers, CLI, MCP server, browser bridge |
 | [`web/`](web) | the playground: React, React Flow, Pyodide worker, DuckDB-Wasm |
-| [`examples/`](examples) | sample data, example pipelines, a legacy Teradata job, three PowerCenter exports, an SSIS package and a Talend job |
-| [`docs/`](docs) | spec reference, architecture notes, importer guides (SQL, PowerCenter, SSIS, Talend), outputs, the pull request bot, the MCP server, releasing |
+| [`examples/`](examples) | sample data, example pipelines, a legacy Teradata job, three PowerCenter exports, an SSIS package, a Talend job and a DataStage export |
+| [`docs/`](docs) | spec reference, architecture notes, importer guides (SQL, PowerCenter, SSIS, Talend, DataStage), outputs, the pull request bot, the MCP server, releasing |
 | [`action.yml`](action.yml) | the pull request bot as a GitHub Action |
 | [`spikes/`](spikes) | small experiments that proved an approach |
 
@@ -493,7 +508,7 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 
 | | Open source | Runs where | Legacy SQL import | Column lineage built in |
 | --- | --- | --- | --- | --- |
-| **Redcliff** | yes, Apache 2.0 | anywhere; generates Spark SQL, PySpark, DuckDB SQL, dbt, Lakeflow | yes: 11 SQL dialects, Informatica PowerCenter, SSIS and Talend | yes |
+| **Redcliff** | yes, Apache 2.0 | anywhere; generates Spark SQL, PySpark, DuckDB SQL, dbt, Lakeflow | yes: 11 SQL dialects, Informatica PowerCenter, SSIS, Talend and DataStage | yes |
 | Prophecy | no | Spark and SQL platforms | yes, including Ab Initio (paid) | yes |
 | Databricks Lakeflow Designer | no | Databricks | no | through Unity Catalog |
 | dbt Canvas | no | dbt platform, Enterprise plans | no | through dbt |
@@ -526,6 +541,7 @@ Visual design that generates real code is a proven idea. Redcliff's angle is doi
 - [x] Data quality expectations on any step: `redcliff test`, results on the canvas, dbt tests and Lakeflow expectations
 - [x] SSIS package (`.dtsx`) importer, with a scorecard
 - [x] Talend job (`.item`) importer, with a scorecard ([details](docs/talend.md))
+- [x] IBM DataStage parallel job (`.dsx` and XML) importer, with a scorecard ([details](docs/datastage.md))
 - [x] `pip install redcliff` from PyPI, released by a tag-triggered workflow
 - [x] OpenLineage run events from `redcliff run`, so a catalog such as Marquez sees each run with its column lineage
 - [x] A Changes tab in the playground: a side-by-side diff, the same report the pull request bot posts
@@ -543,13 +559,12 @@ adjust it on the canvas, and the pipelines that load it are generated from it.
   ignored, Type 7 dual keys), facts with point-in-time key lookups and unknown members
 - [x] **M4** Data Vault 2.0: hubs, links and satellites with MD5 hash keys, and Kimball marts over the vault
 - [x] **M5** Lineage runs from files to model attributes; `redcliff diff`, the PR bot and the MCP server speak the model
-- [x] Legacy jobs (SQL, PowerCenter, SSIS, Talend) propose a model from their joins, lookups, merges and sums, and map
+- [x] Legacy jobs (SQL, PowerCenter, SSIS, Talend, DataStage) propose a model from their joins, lookups, merges and sums, and map
   onto any model, column by column ([how](docs/modeling.md#from-a-legacy-job))
 
 ### Also next
 
 - [ ] VS Code extension: the canvas and lineage next to the spec file
-- [ ] IBM DataStage importer
 
 ---
 

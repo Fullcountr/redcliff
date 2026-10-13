@@ -4,6 +4,7 @@
     redcliff import mapping.xml -o pipeline.yaml --scorecard scorecard.md   (Informatica PowerCenter)
     redcliff import package.dtsx -o pipeline.yaml --scorecard scorecard.md  (SSIS)
     redcliff import job.item -o pipeline.yaml --scorecard scorecard.md  (Talend)
+    redcliff import jobs.dsx -o pipeline.yaml --scorecard scorecard.md  (IBM DataStage)
     redcliff validate pipeline.yaml
     redcliff compile pipeline.yaml --to spark
     redcliff compile pipeline.yaml --to dbt -o my_dbt_project       (or --to lakeflow)
@@ -73,15 +74,18 @@ def _err(message: str) -> None:
 
 
 def _import_file(path: str, args, name: str | None = None):
-    """Import legacy SQL, a PowerCenter export, an SSIS package or a Talend job (the format is detected)."""
+    """Import legacy SQL, a PowerCenter export, an SSIS package, a Talend job or a DataStage export (detected)."""
     text_in = Path(path).read_text(encoding="utf-8")
     from redcliff.ssis import import_ssis, is_ssis
+    from redcliff.datastage import import_datastage, is_datastage
     from redcliff.talend import import_talend, is_talend
 
     if is_ssis(text_in, path):
         return import_ssis(text_in, name=name)
     if is_talend(text_in, path):
         return import_talend(text_in, name=name or Path(path).stem)
+    if is_datastage(text_in, path):
+        return import_datastage(text_in, name=name)
     if path.lower().endswith(".xml") or text_in.lstrip().startswith("<"):
         params = Path(args.params).read_text(encoding="utf-8") if getattr(args, "params", None) else None
         return import_powercenter(text_in, mapping=getattr(args, "mapping", None) or None, name=name, params=params)
@@ -651,10 +655,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"redcliff {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("import", help="turn legacy SQL, a PowerCenter export, an SSIS package or a Talend job into a "
-                                      "pipeline spec")
-    p.add_argument("sql", help="SQL file (one or more statements), a PowerCenter XML export, an SSIS .dtsx or a "
-                               "Talend job (.item)")
+    p = sub.add_parser("import", help="turn legacy SQL, a PowerCenter export, an SSIS package, a Talend job or a "
+                                      "DataStage export into a pipeline spec")
+    p.add_argument("sql", help="SQL file (one or more statements), a PowerCenter XML export, an SSIS .dtsx, a "
+                               "Talend job (.item) or a DataStage export (.dsx or XML)")
     p.add_argument("--dialect", help="sqlglot dialect, e.g. teradata, oracle, tsql, snowflake")
     p.add_argument("--schema", help="JSON/YAML mapping of table -> {column: type}")
     p.add_argument("--name", help="pipeline name (default: the file name)")
@@ -734,7 +738,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("action", choices=["validate", "export", "import", "propose", "map", "pipeline", "test"])
     p.add_argument("file", nargs="+", help="model.yaml to validate or export; a .sql or .dbml file to import; "
                                            "CSV or Parquet files, or a legacy job (SQL, PowerCenter XML, SSIS .dtsx, "
-                                           "Talend .item or a pipeline spec), to propose a model from; "
+                                           "Talend .item, DataStage .dsx or a pipeline spec), to propose a model from; "
                                            "for map, the model then the job")
     p.add_argument("--to", choices=["ddl", "dbml", "mermaid", "dbt"], default="ddl", help="export format")
     p.add_argument("--dialect", help="SQL dialect for DDL export or import (default: duckdb)")

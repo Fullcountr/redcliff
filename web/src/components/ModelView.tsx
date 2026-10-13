@@ -177,6 +177,9 @@ function ModelCanvas({ model, engineReady, dataReady, tab, onTab, onChange, onOp
     id: e.id,
     type: "entity",
     position: positions[e.id] ?? { x: 0, y: 0 },
+    // Known sizes, so a card shows before React Flow has measured it (it hides unmeasured nodes)
+    initialWidth: WIDTH,
+    initialHeight: HEAD + e.attributes.length * ROW + 10,
     draggable: true,
     data: {
       entity: e,

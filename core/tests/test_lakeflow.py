@@ -24,6 +24,7 @@ if shutil.which("java") is None and not os.environ.get("JAVA_HOME"):
     pytest.skip("Spark needs Java", allow_module_level=True)
 
 from redcliff.compile import compile_query  # noqa: E402
+from redcliff.datastage import import_datastage  # noqa: E402
 from redcliff.importer import import_sql  # noqa: E402
 from redcliff.lakeflow import compile_lakeflow  # noqa: E402
 from redcliff.powercenter import import_powercenter  # noqa: E402
@@ -56,6 +57,8 @@ PIPELINES = {
     "ssis_region_revenue": lambda: import_ssis((ROOT / "examples/legacy/ssis/LoadRegionRevenue.dtsx").read_text()).pipeline,
     "talend_order_revenue": lambda: import_talend(  # tMap lookups (filtered, inner with rejects), merge
         (ROOT / "examples/legacy/talend/j_order_revenue.item").read_text(), name="j_order_revenue").pipeline,
+    "datastage_order_revenue": lambda: import_datastage(  # transformer, lookup reject, filter, join
+        (ROOT / "examples/legacy/datastage/px_order_revenue.dsx").read_text()).pipeline,
 }
 
 # Stand-ins for the warehouse tables that table sources read in place.

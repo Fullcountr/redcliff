@@ -334,11 +334,27 @@ await step("a Talend job imports with its tMap lookups, rejects and scorecard", 
   await shot(page, "15b-talend");
 });
 
+await step("a DataStage parallel job imports with its Transformer, lookup reject and scorecard", async () => {
+  await page.locator(".topbar").getByRole("button", { name: "Examples" }).click();
+  await page.getByRole("menuitem", { name: /DataStage parallel job/ }).click();
+  await page.waitForSelector("dialog[open]");
+  assert.match(await page.getByLabel("DataStage export").inputValue(), /CTransformerStage/);
+  await page.locator("dialog").getByRole("button", { name: "Import", exact: true }).click();
+  await page.waitForSelector("dialog[open]", { state: "detached" });
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="agg_region"] .step-rows')?.textContent === "2 rows", null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="lkp_customer_reject"] .step-rows')?.textContent === "1 row");
+  await page.waitForSelector(".score-hero");
+  const items = await page.locator(".score-item .name").allTextContents();
+  assert.ok(items.includes("xfm_prepare") && items.includes("before-job subroutine"), items.join(", "));
+  assert.equal(await page.getByLabel("Variable min_amount").inputValue(), "0");
+  await shot(page, "15c-datastage");
+});
+
 await step("a data model shows as a diagram, exports DDL and Mermaid, and imports DDL", async () => {
   await page.locator(".topbar").getByRole("button", { name: "Examples" }).click();
   await page.getByRole("menuitem", { name: /^sales Kimball/ }).click();
   for (const id of ["dim_customer", "dim_date", "fct_orders"]) await page.waitForSelector(`[data-testid="entity-${id}"]`);
-  assert.equal(await page.locator(".react-flow__edge.rel").count(), 2);
+  await page.waitForFunction(() => document.querySelectorAll(".react-flow__edge.rel").length === 2);  // drawn once measured
   await page.waitForSelector('[data-testid="model-valid"]', { timeout: 30000 });
   await page.locator('[data-testid="entity-fct_orders"]').click();
   assert.match(await page.locator(".panel").textContent(), /Grain: one order/);

@@ -62,7 +62,7 @@ export type ScoreItem = {
   name: string; kind: string; status: ScoreStatus; nodes: string[]; notes: string[]; area?: "pipeline" | "orchestration";
 };
 export type Scorecard = {
-  origin: "powercenter" | "ssis" | "talend" | "sql";
+  origin: "powercenter" | "ssis" | "talend" | "datastage" | "sql";
   title: string;
   counts: Record<ScoreStatus, number>;
   automated: number;
