@@ -69,7 +69,7 @@ class Bridge {
         this.proc = null;
         this.ready = null;
         if (code && !this.lastError) {
-          this.lastError = `"${program} bridge" exited with code ${code}; is Redcliff 0.2.0 or later installed?`;
+          this.lastError = `"${program} bridge" exited with code ${code}; is Redcliff 0.3.0 or later installed?`;
           reject(new Error(this.lastError));
         }
       });

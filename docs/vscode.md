@@ -11,7 +11,7 @@ stays the source of truth: edit it and the canvas follows as you type.
 
 ## Install
 
-1. `pip install redcliff` (0.2.0 or later): the extension runs `redcliff bridge` for the analysis.
+1. `pip install redcliff` (0.3.0 or later): the extension runs `redcliff bridge` for the analysis.
 2. Install the extension: from the VS Code Marketplace or Open VSX once it's published there, or
    from a `.vsix`: every CI run uploads `redcliff-vsix`, and releases attach `redcliff.vsix`. Then
    **Extensions → … → Install from VSIX**.

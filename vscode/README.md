@@ -15,7 +15,7 @@ The YAML stays the source of truth: edit it and the canvas follows as you type.
 
 ## Getting started
 
-1. Install Redcliff, which does the analysis: `pip install redcliff` (0.2.0 or later).
+1. Install Redcliff, which does the analysis: `pip install redcliff` (0.3.0 or later).
 2. Open a pipeline spec (YAML with `version:` and `nodes:`), for example
    [`examples/specs/orders_revenue.yaml`](https://github.com/Fullcountr/redcliff/blob/main/examples/specs/orders_revenue.yaml).
 3. Click the canvas icon in the editor's title bar, or run **Redcliff: Show Pipeline Canvas**.
