@@ -1,6 +1,6 @@
 import * as yaml from "js-yaml";
 import {
-  ArrowRight, Check, CircleAlert, Code2, Copy, Download, FileText, Gauge, GitCompare, Keyboard, MousePointerClick,
+  ArrowRight, Boxes, Check, CircleAlert, Code2, Copy, Download, FileText, Gauge, GitCompare, Keyboard, MousePointerClick,
   Rows3, SlidersHorizontal, Table2, Trash2, TriangleAlert, Unlink, Waypoints, X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -36,6 +36,7 @@ type Props = {
   onClearFocus: () => void;
   baseline: Spec | null;
   onRebase: () => void;
+  onModelFromJob: (style: "kimball" | "data_vault") => void;
 };
 
 const ADDABLE: StepType[] = ["filter", "derive", "select", "aggregate", "join", "union", "sql", "target"];
@@ -629,7 +630,7 @@ function describe(card: Scorecard, source: string): string {
     : `${steps} ${unit} from ${source}`;
 }
 
-function MigrationPanel({ scorecard: card, activeItem, onPickItem, onTab, onSelectStep }: Props & { scorecard: Scorecard }) {
+function MigrationPanel({ scorecard: card, activeItem, onPickItem, onTab, onSelectStep, engineReady, onModelFromJob }: Props & { scorecard: Scorecard }) {
   const [filter, setFilter] = useState<"all" | ScoreStatus>("all");
   const order: Record<ScoreStatus, number> = { manual: 0, review: 1, converted: 2 };
   const items = [...card.items]
@@ -681,6 +682,15 @@ function MigrationPanel({ scorecard: card, activeItem, onPickItem, onTab, onSele
             )}
           </div>
         )}
+      </section>
+      <section data-testid="model-from-job">
+        <h3>Model it</h3>
+        <p className="quiet">Propose a data model for the tables this job reads, from what it does with them: the
+          columns it joins and looks up on become keys, the ones it sums become measures. Every choice names its step.</p>
+        <div className="row">
+          <button className="btn sm" disabled={!engineReady} onClick={() => onModelFromJob("kimball")}><Boxes />Kimball model</button>
+          <button className="btn sm ghost" disabled={!engineReady} onClick={() => onModelFromJob("data_vault")}>Data Vault 2.0</button>
+        </div>
       </section>
       <section>
         <div className="row between filters">

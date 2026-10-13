@@ -38,8 +38,9 @@ Start with list_pipelines and describe_pipeline. Before changing a step, check i
 columns it touches. To change a spec, call propose_edit, show the person the summary and the
 diff it returns, and call apply_edit only after they accept.
 Data models (model.yaml: entities, keys, relationships) are the target the loads produce:
-propose_model profiles data files and proposes one with reasons, generate_load proposes the
-pipeline that loads a model, describe_model reads one. Both proposals go through apply_edit."""
+propose_model profiles data files (or reads a legacy job) and proposes one with reasons,
+map_job shows how much of a legacy job a model covers, generate_load proposes the pipeline
+that loads a model, describe_model reads one. Proposals go through apply_edit."""
 
 
 class ToolError(Exception):
@@ -442,21 +443,55 @@ class Server:
             return {"proposal_id": pid, "spec": path, "new_file": not p.exists(), "summary": summary, "issues": issues,
                     "can_apply": not issues, "report": report, "diff": text_diff}
 
-        @tool("propose_model", "Propose a data model", "Profile CSV or Parquet files in the workspace (keys, nulls, "
-              "references between them) and propose a Kimball or Data Vault 2.0 model, with the reason for every "
-              "choice, as a proposal for a model file (apply it with apply_edit).",
+        def _job(path: str, dialect: str | None = None, params: str | None = None):
+            """A pipeline spec as it is, or a legacy job imported: (pipeline, import result or None)."""
+            src = self.path(path)
+            if src.suffix.lower() in (".yaml", ".yml", ".json"):
+                return self.pipeline(path)[1], None
+            text = src.read_text(encoding="utf-8")
+            from redcliff.ssis import import_ssis, is_ssis
+
+            if is_ssis(text, src.name):
+                return None, import_ssis(text)
+            if src.suffix.lower() == ".xml" or text.lstrip().startswith("<"):
+                from redcliff.powercenter import import_powercenter
+
+                return None, import_powercenter(text, params=self.path(params).read_text(encoding="utf-8") if params else None)
+            from redcliff.importer import import_sql
+
+            return None, import_sql(text, dialect=dialect, name=src.stem)
+
+        def _job_pipeline(path: str, dialect: str | None = None, params: str | None = None):
+            pipeline, result = _job(path, dialect, params)
+            return pipeline if pipeline is not None else result.pipeline
+
+        @tool("propose_model", "Propose a data model", "Propose a Kimball or Data Vault 2.0 model, with the reason for "
+              "every choice, as a proposal for a model file (apply it with apply_edit). Either profile CSV or Parquet "
+              "files in the workspace (keys, nulls, references between them), or read a legacy job (a pipeline spec, "
+              "SQL script, PowerCenter XML or SSIS .dtsx): the columns it joins and looks up on become keys, the ones "
+              "it sums become measures, and the result says how much of what the job writes the model covers.",
               {"files": {"type": "array", "items": S, "description": "Data files, relative to the root"},
+               "job": {**S, "description": "A legacy job or pipeline spec, relative to the root (instead of files)"},
                "out": {**S, "description": "Where the model goes, e.g. models/sales.yaml"},
-               "name": S, "style": {"type": "string", "enum": ["kimball", "data_vault"], "default": "kimball"}},
-              ["files", "out"])
-        def propose_model(files, out, name=None, style="kimball"):
+               "name": S, "style": {"type": "string", "enum": ["kimball", "data_vault"], "default": "kimball"},
+               "dialect": {**S, "description": "SQL dialect of a SQL job, e.g. teradata"}},
+              ["out"])
+        def propose_model(out, files=None, job=None, name=None, style="kimball", dialect=None):
             from redcliff.diff import diff_models
             from redcliff.model import dump_model, load_model
             from redcliff.propose import profile_files, to_data_vault
 
-            paths = [self.path(f) for f in files]
+            if bool(files) == bool(job):
+                raise ToolError("pass either files (data to profile) or job (a legacy job), not both")
             target = self.path(out)
-            proposal = profile_files(self.duck(), paths, base_dir=target.parent)
+            pipeline = None
+            if job:
+                from redcliff.jobmodel import propose_from_job
+
+                pipeline = _job_pipeline(job, dialect)
+                proposal, _ev = propose_from_job(pipeline, base_dir=target.parent, job_dir=self.path(job).parent)
+            else:
+                proposal = profile_files(self.duck(), [self.path(f) for f in files], base_dir=target.parent)
             if style == "data_vault":
                 proposal = to_data_vault(proposal)
             proposal.model.name = name or target.stem
@@ -465,7 +500,26 @@ class Server:
             result = _propose_text(out, dump_model(proposal.model), True, diff.to_markdown(f"Proposed model `{out}`", 3),
                                    diff.summary(), diff.issues)
             result["reasons"] = proposal.reasons
+            if pipeline is not None:
+                from redcliff.jobmodel import map_job
+
+                result["coverage"] = map_job(pipeline, proposal.model, target.parent, self.path(job).parent).to_markdown()
             return result
+
+        @tool("map_job", "Map a job onto a model", "For every column a legacy job (or pipeline spec) writes, the model "
+              "attributes its source columns land in, and the columns the model is missing: how much of the job a model "
+              "covers.",
+              {"model": {**S, "description": "Model path, relative to the root"},
+               "job": {**S, "description": "A legacy job or pipeline spec, relative to the root"},
+               "dialect": {**S, "description": "SQL dialect of a SQL job, e.g. teradata"}},
+              ["model", "job"])
+        def map_job(model, job, dialect=None):
+            from redcliff.jobmodel import map_job as _map
+            from redcliff.model import load_model
+
+            result = _map(_job_pipeline(job, dialect), load_model(self.path(model)), self.path(model).parent,
+                          self.path(job).parent)
+            return {**result.to_dict(), "report": result.to_markdown(f"`{job}` mapped onto `{model}`")}
 
         @tool("generate_load", "Generate a model's load", "The pipeline that loads a data model (SCD2 dimensions, "
               "point-in-time facts; or Data Vault hubs, links and satellites), as a proposal for a pipeline spec "
@@ -496,20 +550,9 @@ class Server:
                "params": {**S, "description": "PowerCenter parameter file path"}},
               ["source", "out"])
         def import_legacy(source, out, dialect=None, params=None):
-            src = self.path(source)
-            text = src.read_text(encoding="utf-8")
-            from redcliff.ssis import import_ssis, is_ssis
-
-            if is_ssis(text, src.name):
-                result = import_ssis(text)
-            elif src.suffix.lower() == ".xml" or text.lstrip().startswith("<"):
-                from redcliff.powercenter import import_powercenter
-
-                result = import_powercenter(text, params=self.path(params).read_text(encoding="utf-8") if params else None)
-            else:
-                from redcliff.importer import import_sql
-
-                result = import_sql(text, dialect=dialect, name=Path(out).stem)
+            _pipeline, result = _job(source, dialect, params)
+            if result is None:
+                raise ToolError(f"{source} is already a pipeline spec")
             proposal = propose_edit(out, new_spec=dump_spec(result.pipeline, "yaml"), data=False)
             proposal["warnings"] = result.warnings
             if result.scorecard is not None:
@@ -531,7 +574,7 @@ class Server:
             return _error_result(msg)
         text = result.get("report") if isinstance(result, dict) and "report" in result else None
         if text:
-            text += "\n\n```diff\n" + result["diff"] + "```\n\n" + json.dumps(
+            text += ("\n\n```diff\n" + result["diff"] + "```" if "diff" in result else "") + "\n\n" + json.dumps(
                 {k: v for k, v in result.items() if k not in ("report", "diff")}, indent=2, default=str)
         else:
             text = json.dumps(result, indent=2, default=str)

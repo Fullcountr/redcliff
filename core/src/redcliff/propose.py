@@ -60,12 +60,23 @@ class TableProfile:
     source: str  # the path or table it was read from
     rows: int
     columns: list[ColumnProfile] = field(default_factory=list)
+    # Evidence from elsewhere than the data (a legacy job): keys and measures with the reason for each.
+    # ``keys`` set (even empty) replaces the profile's candidate keys.
+    keys: dict[str, str] | None = None
+    measures: dict[str, str] = field(default_factory=dict)
 
     def column(self, name: str) -> ColumnProfile | None:
         return next((c for c in self.columns if c.name == name), None)
 
+    def key_reason(self, key: str) -> str:
+        if self.keys is not None and key in self.keys:
+            return self.keys[key]
+        return f"{key} is unique and never null in {self.rows:,} rows"
+
     def candidate_keys(self) -> list[str]:
         """Columns that are never null and never repeat: what could identify a row."""
+        if self.keys is not None:
+            return list(self.keys)
         if not self.rows:
             return []
         return [c.name for c in self.columns if c.nulls == 0 and c.distinct == self.rows and not c.date
@@ -181,7 +192,7 @@ def propose_model(tables: list[TableProfile], references: list[tuple[str, str, s
 
     def measures(t: TableProfile, skip: set[str]) -> list[ColumnProfile]:
         return [c for c in t.columns if c.name not in skip and c.numeric and not c.date
-                and (not c.integer or QUANTITY.search(c.name))]
+                and (not c.integer or QUANTITY.search(c.name) or c.name in t.measures)]
 
     kinds: dict[str, str] = {}
     proposal = ModelProposal(Model(name=name, style="kimball"))
@@ -204,10 +215,12 @@ def propose_model(tables: list[TableProfile], references: list[tuple[str, str, s
             stem = _singular(t.name)
             e = Entity(id=f"dim_{stem}", kind="dimension", source=source)
             if not keys:
-                proposal.why(e.id, f"{t.name} has no column that is unique and never null; mark its business key")
+                proposal.why(e.id, f"nothing in the job identifies a row of {t.name}; mark its business key"
+                             if t.keys is not None else
+                             f"{t.name} has no column that is unique and never null; mark its business key")
             bk = keys[0] if keys else None
             if bk:
-                why_key = f"{bk} is unique and never null in {t.rows:,} rows"
+                why_key = t.key_reason(bk)
                 also = ", and other tables reference it" if t.name in referenced else ""
                 proposal.why(e.id, f"a dimension: {why_key}{also}")
             e.attributes.append(Attribute(f"{stem}_key", "bigint", role="surrogate_key"))
@@ -270,10 +283,10 @@ def propose_model(tables: list[TableProfile], references: list[tuple[str, str, s
                 a = Attribute(c.name, _type(c))
                 if keys and c.name == keys[0]:
                     a.role = "business_key"
-                    proposal.why(f"{e.id}.{c.name}", f"unique and never null in {t.rows:,} rows: identifies a row")
+                    proposal.why(f"{e.id}.{c.name}", f"{t.key_reason(c.name)}: identifies a row")
                 elif c.name in ms:
                     a.role = "measure"
-                    proposal.why(f"{e.id}.{c.name}", "numeric and not a key: a measure")
+                    proposal.why(f"{e.id}.{c.name}", t.measures.get(c.name) or "numeric and not a key: a measure")
                 e.attributes.append(a)
         proposal.model.entities.append(e)
 

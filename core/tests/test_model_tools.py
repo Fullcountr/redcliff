@@ -101,6 +101,19 @@ def test_mcp_model_tools(tmp_path):
     vault = call("propose_model", files=["data/orders.csv", "data/customers.csv"], out="models/vault.yaml", style="data_vault")
     assert "hub_customer" in vault["report"]
 
+    # From a legacy job instead of data: the model, its reasons, and how much of the job it covers.
+    (tmp_path / "jobs").mkdir()
+    shutil.copy(ROOT / "examples" / "legacy" / "ssis" / "LoadRegionRevenue.dtsx", tmp_path / "jobs" / "load.dtsx")
+    from_job = call("propose_model", job="jobs/load.dtsx", out="models/legacy.yaml")
+    assert "dim_region" in from_job["report"] and "8 of 8 columns" in from_job["coverage"]
+    assert any("looks regions rows up" in r for r in from_job["reasons"]["dim_region"])
+    mapped = call("map_job", model="models/sales.yaml", job="jobs/load.dtsx")
+    assert mapped["unmapped"] == {"regions": ["manager", "region"]} and "**no**" in mapped["report"]
+    assert tools["map_job"]["annotations"]["readOnlyHint"]
+    both = server.handle({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
+        "name": "propose_model", "arguments": {"files": ["data/orders.csv"], "job": "jobs/load.dtsx", "out": "m.yaml"}}})
+    assert both["result"]["isError"]
+
     outside = server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                              "params": {"name": "propose_model", "arguments": {"files": ["../x.csv"], "out": "m.yaml"}}})
     assert outside["result"]["isError"]  # paths stay in the workspace

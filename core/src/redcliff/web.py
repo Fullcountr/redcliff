@@ -264,6 +264,28 @@ def model_propose(tables: Any, rows: Any, held: Any, name: str = "proposed", fil
 
 
 @_wrap
+def model_from_job(spec: Any, style: str = "kimball") -> dict[str, Any]:
+    """A model proposed from what a legacy job does (joins, lookups, merges, sums), with the step
+    behind every reason, and how much of what the job writes it covers."""
+    from redcliff.jobmodel import map_job, propose_from_job
+    from redcliff.propose import to_data_vault
+
+    pipeline = _load(spec)
+    proposal, _ev = propose_from_job(pipeline)
+    if style == "data_vault":
+        proposal = to_data_vault(proposal)
+    return {**proposal.to_dict(), "map": map_job(pipeline, proposal.model).to_dict()}
+
+
+@_wrap
+def model_map(model: Any, spec: Any) -> dict[str, Any]:
+    """For every column a job writes, the model attributes its source columns land in."""
+    from redcliff.jobmodel import map_job
+
+    return map_job(_load(spec), _model(model)).to_dict()
+
+
+@_wrap
 def model_load_pipeline(model: Any) -> dict[str, Any]:
     """The pipeline that loads a model (Kimball: SCD2 dimensions and point-in-time facts; Data Vault:
     hubs, links, satellites and current-state marts)."""

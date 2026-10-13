@@ -13,7 +13,7 @@ import {
 import { memo, useEffect, useMemo, useState } from "react";
 import { data } from "../engine/data";
 import { engine } from "../engine/engine";
-import type { DataModel, EntityKind, ModelAnalysis, ModelEntity, ModelExport, Spec } from "../model";
+import type { DataModel, EntityKind, JobMap, ModelAnalysis, ModelEntity, ModelExport, Spec } from "../model";
 import { highlight } from "../ui";
 
 export type ModelTab = "overview" | "load" | "export" | "yaml" | "import";
@@ -121,6 +121,9 @@ type Props = {
   onTab: (t: ModelTab) => void;
   onChange: (m: DataModel, note?: string) => void;
   onOpenPipeline: (spec: Spec) => void;
+  /** The legacy job the model was proposed from: its reasons, and the job to map onto the model. */
+  job?: { spec: Spec; reasons: Record<string, string[]> } | null;
+  onClearJob?: () => void;
 };
 
 export function ModelView(props: Props) {
@@ -131,9 +134,17 @@ export function ModelView(props: Props) {
   );
 }
 
-function ModelCanvas({ model, engineReady, dataReady, tab, onTab, onChange, onOpenPipeline }: Props) {
+function ModelCanvas({ model, engineReady, dataReady, tab, onTab, onChange, onOpenPipeline, job, onClearJob }: Props) {
   const flow = useReactFlow();
-  const [reasons, setReasons] = useState<Record<string, string[]>>({});
+  const [reasons, setReasons] = useState<Record<string, string[]>>(job?.reasons ?? {});
+  const [jobMap, setJobMap] = useState<JobMap | null>(null);
+  useEffect(() => { setReasons(job?.reasons ?? {}); }, [job]);
+  useEffect(() => {
+    if (!job || !engineReady) { setJobMap(null); return; }
+    let live = true;
+    engine.modelMap(model, job.spec).then((r) => { if (live) setJobMap(r.ok ? r : null); });
+    return () => { live = false; };
+  }, [model, job, engineReady]);
   const [picked, setSelected] = useState<string | null>(null);
   const selected = picked && model.entities.some((e) => e.id === picked) ? picked : null; // gone after an import
   const [analysis, setAnalysis] = useState<ModelAnalysis | null>(null);
@@ -221,6 +232,7 @@ function ModelCanvas({ model, engineReady, dataReady, tab, onTab, onChange, onOp
         <div className="panel" role="tabpanel">
           {tab === "overview" && <Overview model={model} analysis={analysis} engineReady={engineReady} reasons={reasons}
             selected={model.entities.find((e) => e.id === selected) ?? null} onSelect={setSelected} />}
+          {tab === "overview" && !selected && job && jobMap && <JobMapSection map={jobMap} name={job.spec.name} />}
           {tab === "load" && <LoadPanel model={model} valid={analysis?.valid ?? false} engineReady={engineReady}
             onOpen={onOpenPipeline} />}
           {tab === "export" && <ExportPanel model={model} valid={analysis?.valid ?? false} engineReady={engineReady} />}
@@ -228,10 +240,10 @@ function ModelCanvas({ model, engineReady, dataReady, tab, onTab, onChange, onOp
           {tab === "import" && (
             <>
               <ProposePanel ready={engineReady && dataReady} onPropose={(m, why) => {
-                setReasons(why); setSelected(null); onChange(m, `Proposed ${m.entities.length} entities; click one to see why`);
+                onClearJob?.(); setReasons(why); setSelected(null); onChange(m, `Proposed ${m.entities.length} entities; click one to see why`);
                 onTab("overview");
               }} />
-              <ImportPanel engineReady={engineReady} onChange={(m, note) => { setReasons({}); onChange(m, note); }} />
+              <ImportPanel engineReady={engineReady} onChange={(m, note) => { onClearJob?.(); setReasons({}); onChange(m, note); }} />
             </>
           )}
         </div>
@@ -314,6 +326,39 @@ function Overview({ model, analysis, engineReady, reasons, selected, onSelect }:
         </section>
       )}
     </>
+  );
+}
+
+/** How much of what a legacy job writes the model covers, column by column; gaps first. */
+function JobMapSection({ map, name }: { map: JobMap; name: string }) {
+  const cols = [...map.columns].sort((a, b) => Number(a.covered) - Number(b.covered));
+  return (
+    <section data-testid="job-map">
+      <h3>Legacy job coverage</h3>
+      <p data-testid="job-map-summary"><strong>{map.covered} of {map.total}</strong> columns <span className="mono">{name}</span> writes
+        ({Math.round(map.coverage * 100)}%) come from model attributes.</p>
+      <div className="bar-track"><div className="bar-fill" style={{ width: `${map.coverage * 100}%` }} /></div>
+      <ul className="job-map-list">
+        {cols.map((c) => {
+          const direct = c.inputs.filter((i) => i.kind === "direct");
+          return (
+            <li key={`${c.target}.${c.column}`} className={c.covered ? "" : "is-gap"}>
+              <div className="mono">{c.table ?? c.target}.{c.column}</div>
+              {direct.length === 0 ? <div className="quiet">computed by the job</div> : direct.map((i) => (
+                <div key={`${i.table}.${i.column}`} className="mono from">
+                  <span className="quiet">{i.table}.{i.column} → </span>
+                  {i.attributes.length ? i.attributes.join(", ") : <span className="bad-text">not in the model</span>}
+                </div>
+              ))}
+            </li>
+          );
+        })}
+      </ul>
+      {Object.keys(map.unmapped).length > 0 && (
+        <p className="quiet">Read by the job but not in the model: {Object.entries(map.unmapped).map(([t, cs]) =>
+          <span key={t}><span className="mono">{t}</span> ({cs.join(", ")}) </span>)}</p>
+      )}
+    </section>
   );
 }
 

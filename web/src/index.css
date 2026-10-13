@@ -980,3 +980,10 @@ td.rowno { color: var(--text-3); }
 .sbs-row.same .sbs-cell { color: var(--text-2); }
 .sbs-skip { padding: 2px 6px; font-size: 11px; color: var(--text-2); background: var(--line); text-align: center; }
 .sbs-row:not(.same) .sbs-cell { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* A legacy job mapped onto a model */
+.job-map-list { list-style: none; margin: 10px 0 0; padding: 0; }
+.job-map-list li { padding: 6px 0 6px 8px; border-bottom: 1px solid var(--line); font-size: 12px; overflow-wrap: anywhere; }
+.job-map-list li .from { font-size: 11px; padding-left: 10px; }
+.job-map-list li.is-gap { box-shadow: inset 2px 0 var(--bad); }
+.bad-text { color: var(--bad); }

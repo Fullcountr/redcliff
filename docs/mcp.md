@@ -44,7 +44,8 @@ Claude Desktop, Cursor and other clients take the same command in their JSON con
 | `propose_edit` | validates a change and returns what it does, plus a text diff | no |
 | `import_legacy` | turns a SQL script or PowerCenter export into a proposed new spec, with its scorecard | no |
 | `describe_model` | a data model's entities (kind, keys, grain, history), relationships and problems | no |
-| `propose_model` | profiles data files and proposes a Kimball or Data Vault model, with the reason for every choice, as a proposal | no |
+| `propose_model` | profiles data files, or reads a legacy job (`job`), and proposes a Kimball or Data Vault model, with the reason for every choice, as a proposal; from a job, also the job's coverage | no |
+| `map_job` | for every column a legacy job writes, the model attributes behind it, and what the model is missing | no |
 | `generate_load` | the pipeline that loads a model, as a proposal | no |
 | `apply_edit` | writes an accepted proposal | **yes** |
 

@@ -236,6 +236,18 @@ await step("importing a PowerCenter mapping shows its migration scorecard", asyn
   await page.mouse.move(5, 5);
 });
 
+await step("a PowerCenter mapping becomes a proposed model, with what it covers", async () => {
+  await page.getByRole("tab", { name: /Migration/ }).click();
+  await page.locator('[data-testid="model-from-job"]').getByRole("button", { name: "Kimball model" }).click();
+  for (const id of ["dim_customer", "dim_region", "dim_date", "fct_orders"]) await page.waitForSelector(`[data-testid="entity-${id}"]`);
+  await page.waitForFunction(() => /13 of 13/.test(document.querySelector('[data-testid="job-map-summary"]')?.textContent ?? ""), null, { timeout: 30000 });
+  await shot(page, "12b-model-from-job");
+  await page.locator('[data-testid="entity-dim_region"]').click();
+  assert.match(await page.locator('[data-testid="model-why"]').textContent(), /looks regions rows up by region \(step lkp_region_unique\)/);
+  await page.locator(".topbar").getByRole("button", { name: "Pipelines" }).click();
+  await page.waitForSelector('.react-flow__node[data-id="agg_region_month"]');
+});
+
 await step("a PowerCenter workflow imports with its mapplet, session and parameter file", async () => {
   await page.locator(".topbar").getByRole("button", { name: "Examples" }).click();
   await page.getByRole("menuitem", { name: /PowerCenter workflow/ }).click();

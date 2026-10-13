@@ -87,6 +87,8 @@ export default function App() {
   const [view, setView] = useState<"pipeline" | "model">("pipeline");
   const [dataModel, setDataModel] = useState<DataModel | null>(null);
   const [modelTab, setModelTab] = useState<ModelTab>("overview");
+  // The legacy job a model was proposed from, so the model view can show the reasons and the coverage.
+  const [job, setJob] = useState<{ spec: Spec; reasons: Record<string, string[]> } | null>(null);
   useEffect(() => { if (importing.mode) setView("pipeline"); }, [importing.mode]);
   const [theme, setTheme, dark] = useTheme();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -428,9 +430,21 @@ export default function App() {
   const openModel = (m: DataModel | null, t: ModelTab = "overview") => {
     const next = m ?? dataModel ?? (samples ? Object.values(samples.models)[0] : null);
     if (!next) return;
+    if (m) setJob(null);
     setDataModel(next);
     setModelTab(t);
     setView("model");
+  };
+
+  const modelFromJob = async (style: "kimball" | "data_vault") => {
+    if (!spec) return;
+    const r = await engine.modelFromJob(spec, style);
+    if (!r.ok) { say(`Couldn't propose a model: ${r.error}`); return; }
+    setJob({ spec, reasons: r.reasons });
+    setDataModel(r.model);
+    setModelTab("overview");
+    setView("model");
+    say(`Proposed ${r.model.entities.length} entities from ${spec.name}; ${Math.round(r.map.coverage * 100)}% of what it writes comes from them`);
   };
 
   const share = async () => {
@@ -454,7 +468,7 @@ export default function App() {
   return (
     <div className="app">
       {view === "model" && dataModel && (
-        <ModelView model={dataModel} engineReady={ready} dataReady={dataReady} tab={modelTab} onTab={setModelTab}
+        <ModelView model={dataModel} engineReady={ready} dataReady={dataReady} tab={modelTab} onTab={setModelTab} job={job} onClearJob={() => setJob(null)}
           onChange={(m, note) => { setDataModel(m); if (note) say(note); }}
           onOpenPipeline={(s) => { setView("pipeline"); setExample(""); replaceSpec(s, false); setNotes([]); setScorecard(null);
             setSelectedId(null); say(`Opened ${s.name}: the load generated from the model`); }} />
@@ -627,6 +641,7 @@ export default function App() {
           spec={spec}
           baseline={baseline}
           onRebase={() => setBaseline(spec)}
+          onModelFromJob={(style) => void modelFromJob(style)}
           analysis={analysis}
           selected={selected}
           impact={impact}

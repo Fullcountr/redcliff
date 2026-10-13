@@ -403,6 +403,7 @@ and integer division. See [`docs/ssis.md`](docs/ssis.md).
 | `redcliff test pipeline.yaml [--node ID]` | run the data quality expectations ([details](docs/spec.md#expectations)) |
 | `redcliff trace pipeline.yaml STEP [--where COND]` | row-level trace: each row of a step with the source rows behind it |
 | `redcliff diff old.yaml new.yaml [--data]` or `redcliff diff --git REF` | what a change does: steps, columns, lineage and rows ([details](docs/pr-bot.md)) |
+| `redcliff model propose\|map\|pipeline\|test\|export\|import ...` | data models: propose one from data files or a legacy job, map a job onto one, generate and check its load ([details](docs/modeling.md#commands-m1)) |
 | `redcliff mcp --root .` | an MCP server, so AI agents can read and edit pipelines, with a diff you accept first ([details](docs/mcp.md)) |
 
 ---
@@ -528,10 +529,11 @@ adjust it on the canvas, and the pipelines that load it are generated from it.
   ignored, Type 7 dual keys), facts with point-in-time key lookups and unknown members
 - [x] **M4** Data Vault 2.0: hubs, links and satellites with MD5 hash keys, and Kimball marts over the vault
 - [x] **M5** Lineage runs from files to model attributes; `redcliff diff`, the PR bot and the MCP server speak the model
+- [x] Legacy jobs (SQL, PowerCenter, SSIS) propose a model from their joins, lookups, merges and sums, and map
+  onto any model, column by column ([how](docs/modeling.md#from-a-legacy-job))
 
 ### Also next
 
-- [ ] Legacy imports (SQL, PowerCenter, SSIS) mapped onto a proposed model
 - [ ] VS Code extension: the canvas and lineage next to the spec file
 - [ ] Talend and IBM DataStage importers
 

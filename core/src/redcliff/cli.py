@@ -71,19 +71,32 @@ def _err(message: str) -> None:
 # --------------------------------------------------------------------------- commands
 
 
-def cmd_import(args) -> int:
-    text_in = Path(args.sql).read_text(encoding="utf-8")
+def _import_file(path: str, args, name: str | None = None):
+    """Import legacy SQL, a PowerCenter export or an SSIS package (the format is detected)."""
+    text_in = Path(path).read_text(encoding="utf-8")
     from redcliff.ssis import import_ssis, is_ssis
 
-    if is_ssis(text_in, args.sql):
-        result = import_ssis(text_in, name=args.name)
-    elif args.sql.lower().endswith(".xml") or text_in.lstrip().startswith("<"):
-        params = Path(args.params).read_text(encoding="utf-8") if args.params else None
-        result = import_powercenter(text_in, mapping=args.mapping or None, name=args.name, params=params)
-    else:
-        schema = _read_mapping(args.schema) if args.schema else None
-        name = args.name or Path(args.sql).stem
-        result = import_sql(text_in, dialect=args.dialect, name=name, schema=schema)
+    if is_ssis(text_in, path):
+        return import_ssis(text_in, name=name)
+    if path.lower().endswith(".xml") or text_in.lstrip().startswith("<"):
+        params = Path(args.params).read_text(encoding="utf-8") if getattr(args, "params", None) else None
+        return import_powercenter(text_in, mapping=getattr(args, "mapping", None) or None, name=name, params=params)
+    schema = _read_mapping(args.schema) if getattr(args, "schema", None) else None
+    return import_sql(text_in, dialect=getattr(args, "dialect", None), name=name or Path(path).stem, schema=schema)
+
+
+def _load_job(path: str, args):
+    """A pipeline spec as it is, or a legacy job imported (warnings go to stderr)."""
+    if path.lower().endswith((".yaml", ".yml", ".json")):
+        return load_spec(path)
+    result = _import_file(path, args)
+    for w in result.warnings:
+        _err(f"warning: {w}")
+    return result.pipeline
+
+
+def cmd_import(args) -> int:
+    result = _import_file(args.sql, args, args.name)
     text = _write_spec(result.pipeline.to_dict(), args.output)
     if not args.output:
         print(text, end="")
@@ -488,25 +501,67 @@ def cmd_model(args) -> int:
     from redcliff import model as m
 
     if args.action == "propose":
-        try:
-            import duckdb
-        except ImportError:
-            _err("propose needs DuckDB: pip install 'redcliff[cli]'")
-            return 2
-        from redcliff.propose import profile_files
+        from redcliff.propose import to_data_vault
 
         base = Path(args.output).parent if args.output else Path.cwd()
-        proposal = profile_files(duckdb.connect(), args.file, base_dir=base)
+        data = [f for f in args.file if f.lower().endswith((".csv", ".parquet", ".tsv"))]
+        job_map = None
+        if data and len(data) != len(args.file):
+            _err("propose from data files (CSV, Parquet) or from one legacy job, not both")
+            return 2
+        if data:
+            try:
+                import duckdb
+            except ImportError:
+                _err("propose needs DuckDB: pip install 'redcliff[cli]'")
+                return 2
+            from redcliff.propose import profile_files
+
+            proposal = profile_files(duckdb.connect(), args.file, base_dir=base)
+        else:
+            if len(args.file) != 1:
+                _err("propose from one legacy job at a time")
+                return 2
+            from redcliff.jobmodel import map_job, propose_from_job
+
+            job = _load_job(args.file[0], args)
+            proposal, _ev = propose_from_job(job, base_dir=base, job_dir=Path(args.file[0]).parent)
+            job_map = map_job(job, proposal.model, base, Path(args.file[0]).parent)
+        if args.style == "data_vault":
+            proposal = to_data_vault(proposal)
+            if job_map is not None:
+                job_map = map_job(job, proposal.model, base, Path(args.file[0]).parent)
         proposal.model.name = args.name or proposal.model.name
         for ref, why in proposal.reasons.items():
             for w in why:
                 _err(f"{ref}: {w}")
+        if job_map is not None:
+            _err(f"{job_map.to_dict()['covered']} of {len(job_map.columns)} columns the job writes "
+                 f"({job_map.coverage():.0%}) come from model attributes; details: redcliff model map MODEL JOB")
         out = m.dump_model(proposal.model, "json" if (args.output or "").endswith(".json") else "yaml")
         if args.output:
             Path(args.output).write_text(out, encoding="utf-8")
             _err(f"wrote {args.output}; review it, then: redcliff model validate {args.output}")
         else:
             print(out, end="")
+        return 0
+    if args.action == "map":
+        if len(args.file) != 2:
+            _err("model map takes a model and a job: redcliff model map model.yaml job.sql")
+            return 2
+        from redcliff.jobmodel import map_job
+
+        model = m.load_model(args.file[0])
+        job = _load_job(args.file[1], args)
+        result = map_job(job, model, Path(args.file[0]).parent, Path(args.file[1]).parent)
+        out = (json.dumps(result.to_dict(), indent=2) + "\n" if (args.output or "").endswith(".json")
+               else result.to_markdown(f"{Path(args.file[1]).name} mapped onto {Path(args.file[0]).name}"))
+        if args.output:
+            Path(args.output).write_text(out, encoding="utf-8")
+            _err(f"wrote {args.output}")
+        else:
+            print(out, end="")
+        _err(f"{result.coverage():.0%} of the columns the job writes come from model attributes")
         return 0
     if len(args.file) != 1:
         _err(f"model {args.action} takes one file")
@@ -668,13 +723,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("model", help="data models: propose one from files, validate, export (DDL, DBML, Mermaid, dbt), "
                                      "import (DDL, DBML), generate the pipeline that loads it, test the loaded tables")
-    p.add_argument("action", choices=["validate", "export", "import", "propose", "pipeline", "test"])
+    p.add_argument("action", choices=["validate", "export", "import", "propose", "map", "pipeline", "test"])
     p.add_argument("file", nargs="+", help="model.yaml to validate or export; a .sql or .dbml file to import; "
-                                           "CSV or Parquet files to propose a model from")
+                                           "CSV or Parquet files, or a legacy job (SQL, PowerCenter XML, SSIS .dtsx "
+                                           "or a pipeline spec), to propose a model from; for map, the model then the job")
     p.add_argument("--to", choices=["ddl", "dbml", "mermaid", "dbt"], default="ddl", help="export format")
     p.add_argument("--dialect", help="SQL dialect for DDL export or import (default: duckdb)")
     p.add_argument("--name", help="model name for an import or propose; pipeline name for pipeline")
     p.add_argument("--db", help="model test: the DuckDB file the model was loaded into")
+    p.add_argument("--style", choices=["kimball", "data_vault"], default="kimball", help="propose: the model style")
+    p.add_argument("--schema", help="propose/map from legacy SQL: JSON/YAML mapping of table -> {column: type}")
+    p.add_argument("--params", help="propose/map from PowerCenter: a parameter file")
+    p.add_argument("--mapping", action="append", help="propose/map from PowerCenter: only this mapping (repeatable)")
     p.add_argument("-o", "--output", help="write to this file instead of printing")
     p.set_defaults(func=cmd_model)
 

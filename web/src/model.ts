@@ -185,3 +185,15 @@ export type ModelAnalysis = {
   scd2: string[];
 };
 export type ModelExport = "ddl" | "dbml" | "mermaid" | "dbt";
+/** A legacy job mapped onto a model: for every column it writes, the model attributes behind it. */
+export type JobMap = {
+  coverage: number;
+  covered: number;
+  total: number;
+  columns: {
+    target: string; table: string | null; column: string; covered: boolean;
+    inputs: { table: string; column: string; kind: "direct" | "indirect"; attributes: string[] }[];
+  }[];
+  unmapped: Record<string, string[]>;
+  tables: Record<string, string[]>;
+};

@@ -1,5 +1,5 @@
 // Promise-based client for the Pyodide engine worker.
-import type { Analysis, DataModel, Impact, ImportResult, ModelAnalysis, ModelExport, Spec } from "../model";
+import type { Analysis, DataModel, Impact, ImportResult, JobMap, ModelAnalysis, ModelExport, Spec } from "../model";
 
 type Result<T> = ({ ok: true } & T) | { ok: false; error: string; issues?: string[] };
 
@@ -66,6 +66,9 @@ export const engine = {
   modelPropose: (tables: Record<string, Record<string, string>>, rows: Record<string, unknown[]>, held: string[][], name: string) =>
     call<{ model: DataModel; reasons: Record<string, string[]> }>(
       "model_propose", JSON.stringify(tables), JSON.stringify(rows), JSON.stringify(held), name),
+  modelFromJob: (spec: Spec, style: "kimball" | "data_vault") =>
+    call<{ model: DataModel; reasons: Record<string, string[]>; map: JobMap }>("model_from_job", JSON.stringify(spec), style),
+  modelMap: (model: DataModel, spec: Spec) => call<JobMap>("model_map", JSON.stringify(model), JSON.stringify(spec)),
   modelLoadPipeline: (model: DataModel) => call<{ spec: Spec; targets: string[] }>("model_load_pipeline", JSON.stringify(model)),
   modelImport: (text: string, fmt: "ddl" | "dbml", dialect: string | null, name: string) =>
     call<{ model: DataModel; warnings: string[] }>("model_import", text, fmt, dialect, name),

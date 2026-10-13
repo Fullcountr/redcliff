@@ -79,7 +79,9 @@ apply to dimension attributes.
 | `redcliff model export model.yaml --to ddl [--dialect snowflake]` | `CREATE TABLE` statements with primary and foreign keys (Spark gets them as comments) |
 | `redcliff model export model.yaml --to dbml\|mermaid\|dbt` | DBML for dbdiagram.io, a Mermaid `erDiagram`, or a dbt `schema.yml` with key and relationship tests |
 | `redcliff model import tables.sql [--dialect postgres]` | a model from `CREATE TABLE` statements: columns, primary and foreign keys |
-| `redcliff model propose a.csv b.csv -o model.yaml` | profile files and propose a Kimball model, with the reason for each choice |
+| `redcliff model propose a.csv b.csv -o model.yaml [--style data_vault]` | profile files and propose a Kimball (or Data Vault) model, with the reason for each choice |
+| `redcliff model propose job.sql\|mapping.xml\|package.dtsx\|pipeline.yaml -o model.yaml` | propose a model from what a legacy job does ([below](#from-a-legacy-job)) |
+| `redcliff model map model.yaml job.xml [-o map.md\|map.json]` | for every column the job writes, the model attributes behind it |
 | `redcliff model pipeline model.yaml -o load.yaml` | the pipeline that loads the model |
 | `redcliff model test model.yaml --db w.duckdb` | check the loaded tables |
 | `redcliff model import model.dbml` | a model from DBML, including the roles and history `export --to dbml` writes into notes |
@@ -108,6 +110,35 @@ and tests the foreign keys the names suggest (`orders.customer_id` against `cust
 
 Every choice comes with its reason, printed by the CLI and shown in the playground when you click an
 entity. `redcliff.propose.to_data_vault` turns the same proposal into hubs, links and satellites.
+
+## From a legacy job
+
+A legacy job knows things about its tables that a profile of the data can't tell you, and it knows
+them without any data. `redcliff model propose m_customer_revenue.xml -o model.yaml` imports the job
+(SQL, PowerCenter, SSIS, or a pipeline spec as it is) and reads:
+
+| In the job | Becomes |
+| --- | --- |
+| a join `orders.customer_id = customers.id` | a reference from orders to customers; `id` is customers' key (the side named like a key is the one side) |
+| a lookup: a table deduplicated on one column (`ANY_VALUE`, `MAX`) before a join | that column is the table's key |
+| a target merged on keys, with no aggregate on the way | the keys identify the source table's rows |
+| a column named like its table's key (`order_id` in orders), when nothing else says | the key |
+| `SUM(amount)`, `AVG(amount)` | `amount` is a measure |
+
+Join keys are traced back through the job's steps to the source columns, so a join on a renamed or
+cleaned column still counts. A join where neither side looks like a key is noted, not guessed. Then
+the same rules as a proposal from data apply (facts, dimensions, SCD2, Type 7, a date dimension),
+and every reason names the step it came from: *the job looks regions rows up by region (step
+lkp_region_unique)*. A reference between two dimensions (customers to regions) is flagged as a
+snowflake. Columns the job never reads are listed, so you can drop them or keep them on purpose.
+Entity sources are the job's own tables, so the generated load reads them where they are.
+
+`redcliff model map model.yaml job.xml` works the other way round, with any model: for every column
+the job writes, the source columns behind it and the model attributes they land in, and the columns
+the job reads that the model doesn't hold. A legacy table matches an entity whose source is the same
+table, or a file of the same name (`orders` and `orders.csv`). The coverage line, "13 of 13 columns
+the job writes (100%) come from model attributes", says whether the job's reports can be rebuilt on
+the model.
 
 ## Loading a model (M3, M4)
 
@@ -143,8 +174,9 @@ and [`sales_vault.yaml`](../examples/models/sales_vault.yaml) → [`load_sales_v
   load reads back (a fact's dimension lookup): `redcliff lineage load.yaml --column dim_date.year`.
 - `redcliff diff` (and so the pull request bot) reports a changed model file as a model: entities,
   attributes and relationships added, removed or changed.
-- The MCP server has `describe_model`, `propose_model` (profile files, propose a model with reasons)
-  and `generate_load`; their results are proposals that `apply_edit` writes, like any edit.
+- The MCP server has `describe_model`, `propose_model` (profile files, or read a legacy job, and
+  propose a model with reasons), `map_job` and `generate_load`; proposals go through `apply_edit`,
+  like any edit.
 
 ## In the playground
 
@@ -153,4 +185,6 @@ attributes with PK, FK, SK, BK, Σ and SCD1 marks) and relationships drawn key t
 for its attributes. The panel checks the model, exports DDL (in eight dialects), DBML, Mermaid and dbt,
 edits the YAML, and imports DDL or DBML (**Import → Data model**). **Import → Data model → From
 your data** profiles the loaded tables and proposes a model; the **Load** tab generates its pipeline
-and opens it on the canvas. **Pipelines** goes back to the canvas.
+and opens it on the canvas. **Pipelines** goes back to the canvas. After importing a legacy job,
+its **Migration** tab has **Model it**: a Kimball or Data Vault model proposed from the job, with the
+step behind each reason and the job's coverage, column by column, under the model's checks.
