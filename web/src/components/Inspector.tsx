@@ -53,13 +53,14 @@ export function Inspector(props: Props) {
   if (scorecard) tabs.push({ id: "migration", label: "Migration", icon: Gauge });
   return (
     <aside className="inspector" aria-label="Inspector">
-      <div className="tabs" role="tablist">
+      <div className={tabs.length > 5 ? "tabs compact" : "tabs"} role="tablist">
         {tabs.map((t) => (
           <button
             key={t.id}
             role="tab"
             aria-selected={tab === t.id}
             aria-label={t.label}
+            title={t.label}
             className={tab === t.id ? "tab is-active" : "tab"}
             onClick={() => onTab(t.id)}
           >

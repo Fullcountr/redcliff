@@ -530,14 +530,14 @@ export default function App() {
         </div>
         <nav className="bar-actions" aria-label="Pipeline">
           {view === "model" && (
-            <button className="btn ghost" onClick={() => setView("pipeline")} title="Back to the pipeline canvas">
+            <button className="btn ghost" onClick={() => setView("pipeline")} aria-label="Pipelines" title="Back to the pipeline canvas">
               <Waypoints /><span className="label">Pipelines</span>
             </button>
           )}
           <Menu
             label="Examples"
             button={({ open, toggle }) => (
-              <button className="btn ghost" onClick={toggle} aria-expanded={open} disabled={!samples}>
+              <button className="btn ghost" onClick={toggle} aria-expanded={open} disabled={!samples} aria-label="Examples">
                 <BookOpen /><span className="label">Examples</span><ChevronDown className="caret" />
               </button>
             )}
@@ -575,7 +575,7 @@ export default function App() {
               </>
             )}
           </Menu>
-          <button className="btn ghost" onClick={() => fileInput.current?.click()} disabled={!runnable || view !== "pipeline"} title="Add CSV files as sources">
+          <button className="btn ghost" onClick={() => fileInput.current?.click()} disabled={!runnable || view !== "pipeline"} aria-label="Add CSV" title="Add CSV files as sources">
             <FileSpreadsheet /><span className="label">Add CSV</span>
           </button>
           <input ref={fileInput} type="file" accept=".csv" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
@@ -590,7 +590,7 @@ export default function App() {
           <Menu
             label="Import"
             button={({ open, toggle }) => (
-              <button className="btn primary" onClick={toggle} aria-expanded={open} disabled={!ready}
+              <button className="btn primary" onClick={toggle} aria-expanded={open} disabled={!ready} aria-label="Import"
                 title={ready ? "Import a legacy job" : "Available once the engine has started"}>
                 <Upload /><span className="label">Import</span><ChevronDown className="caret" />
               </button>

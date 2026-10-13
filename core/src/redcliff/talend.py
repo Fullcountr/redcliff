@@ -107,6 +107,12 @@ class _Comp:
         return self.params.get(name, "").strip().lower() == "true"
 
     @property
+    def labelled(self) -> bool:
+        """Whether the job gives the component a label of its own (not the default, its unique name)."""
+        label = (self.params.get("LABEL") or "").strip().strip('"')
+        return bool(label) and "__" not in label
+
+    @property
     def base(self) -> str:
         """A step name: the label the job gives the component, else its unique name."""
         label = (self.params.get("LABEL") or "").strip().strip('"')
@@ -363,7 +369,7 @@ class _Importer:
         query = self.string(comp, "QUERY").strip() if comp.params.get("QUERY") else ""
         table = self.string(comp, "TABLE") if comp.params.get("TABLE") else ""
         if query:
-            node = self.run_sql(query, dialect, comp.base, schema)
+            node = self.run_sql(query, dialect, comp.base, schema, comp.labelled)
             result = self.b.cols.get(node) or []
             if len(result) != len(schema):
                 raise _Manual(f"its query returns {len(result)} columns for {len(schema)} in the schema")
@@ -388,7 +394,7 @@ class _Importer:
             self.b.tables[key] = node
         return self.stream_of(node, schema)
 
-    def run_sql(self, sql: str, dialect: str | None, label: str, schema: list[_Col]) -> str:
+    def run_sql(self, sql: str, dialect: str | None, label: str, schema: list[_Col], labelled: bool = True) -> str:
         if re.search(r"(?<![\w'])\?(?![\w'])", sql) or "${" in sql:
             raise _Manual("its query takes parameters, which Redcliff can't fill; inline them or use a context variable")
         try:
@@ -411,8 +417,9 @@ class _Importer:
                     declared.setdefault(other.name, "TEXT")
         node = self.b.convert_query(tree, {}, label)
         if next(n for n in self.b.nodes if n["id"] == node)["type"] == "source":
-            # SELECT a, b FROM t became the table itself; the table may have more columns, so name them
-            node = self.add("select", [node], {"columns": list(self.b.cols[node])}, f"{label}_columns")
+            # SELECT a, b FROM t became the table itself; the table may have more columns, so name them,
+            # in a step named for the component (or, unlabelled, for the table)
+            node = self.add("select", [node], {"columns": list(self.b.cols[node])}, label if labelled else f"{node}_columns")
         return node
 
     def c_file_input(self, comp: _Comp) -> None:

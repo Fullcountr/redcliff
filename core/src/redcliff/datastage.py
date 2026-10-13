@@ -566,8 +566,9 @@ class _Importer:
                     schema.setdefault(other.name, "TEXT")
         node = self.b.convert_query(tree, {}, label)
         if next(n for n in self.b.nodes if n["id"] == node)["type"] == "source":
-            # SELECT a, b FROM t became the table itself; the table may have more columns, so name them
-            node = self.add("select", [node], {"columns": list(self.b.cols[node])}, f"{label}_columns")
+            # SELECT a, b FROM t became the table itself; the table may have more columns, so name them,
+            # in a step named for the stage
+            node = self.add("select", [node], {"columns": list(self.b.cols[node])}, label)
         return node
 
     def sequential_file(self, stage: _Stage) -> None:

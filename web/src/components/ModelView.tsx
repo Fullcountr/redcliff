@@ -491,7 +491,7 @@ function ImportPanel({ engineReady, onChange }: { engineReady: boolean; onChange
       <p className="quiet">Paste <code>CREATE TABLE</code> statements or DBML. Table names give the kind
         (<code>dim_</code>, <code>fct_</code>, <code>hub_</code>, <code>lnk_</code>, <code>sat_</code>); anything Redcliff
         can't place comes back as a warning.</p>
-      <textarea className="code-input tall" spellCheck={false} value={text} aria-label="DDL or DBML"
+      <textarea className="code-input medium" spellCheck={false} value={text} aria-label="DDL or DBML"
         onChange={(e) => setText(e.target.value)} />
       <div className="row between project-bar">
         <span className="chip">{fmt === "dbml" ? "DBML" : "SQL DDL"}</span>

@@ -348,7 +348,7 @@ def test_lookup_continue_drop_and_unkeyed_references():
     assert not any(n.id.endswith("_unique") for n in keep.pipeline.nodes)
     drop = import_datastage(build("drop", False))
     assert next(n for n in drop.pipeline.nodes if n.type == "join").params == {
-        "condition": "ora_orders_columns.customer_id = lkp_lnk_ref_unique.id"}
+        "condition": "ora_orders.customer_id = lkp_lnk_ref_unique.id"}
     assert item(drop, "lkp").status == REVIEW  # the reference isn't keyed: one row per key is kept
     fail = import_datastage(build("fail", True))
     assert item(fail, "lkp").status == REVIEW and "stops the job" in " ".join(item(fail, "lkp").notes)
