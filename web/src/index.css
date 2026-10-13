@@ -579,9 +579,11 @@ kbd {
 .tabs {
   display: flex; gap: 2px; margin: 10px 10px 0; padding: 3px;
   border-radius: 10px; background: var(--sunk); border: 1px solid var(--line);
+  min-width: 0; overflow-x: auto; scrollbar-width: none; flex: none;
 }
+.tabs::-webkit-scrollbar { display: none; }
 .tab {
-  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  flex: 1 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   height: 28px; padding: 0 6px; border: 0; border-radius: 7px; background: none;
   font-size: 12.5px; font-weight: 500; color: var(--text-2); cursor: pointer;
   transition: background 0.15s var(--ease), color 0.15s var(--ease), box-shadow 0.15s var(--ease);

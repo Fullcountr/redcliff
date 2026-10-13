@@ -165,6 +165,16 @@ def import_ssis(xml: str) -> dict[str, Any]:
 
 
 @_wrap
+def import_talend(xml: str, name: str | None = None) -> dict[str, Any]:
+    """A Talend job (.item) in, spec and migration scorecard out."""
+    from redcliff.talend import import_talend as _import_talend
+
+    result = _import_talend(xml, name=name or None)
+    return {"spec": result.pipeline.to_dict(), "warnings": result.warnings, "outputs": result.outputs,
+            "scorecard": result.scorecard.to_dict()}
+
+
+@_wrap
 def impact(spec: Any, node_id: str, column: str) -> dict[str, Any]:
     """Blast radius of one column."""
     graph = build_graph(_load(spec))

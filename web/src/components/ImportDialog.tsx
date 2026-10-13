@@ -1,4 +1,4 @@
-import { Boxes, FileCode2, FileUp, Lock, Sparkles, Workflow, X } from "lucide-react";
+import { Boxes, FileCode2, FileUp, Lock, Network, Sparkles, Workflow, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 const DIALECTS = [
@@ -7,8 +7,8 @@ const DIALECTS = [
   ["hive", "Hive"], ["spark", "Spark SQL"], ["duckdb", "DuckDB"],
 ] as const;
 
-export type ImportMode = "sql" | "powercenter" | "ssis";
-export type ImportSamples = { sql: string; powercenter: string; params?: string; ssis: string };
+export type ImportMode = "sql" | "powercenter" | "ssis" | "talend";
+export type ImportSamples = { sql: string; powercenter: string; params?: string; ssis: string; talend: string };
 
 type Props = {
   mode: ImportMode;
@@ -25,6 +25,7 @@ export function ImportDialog({ mode: initialMode, samples, busy, error, onImport
   const [xml, setXml] = useState(samples.powercenter);
   const [params, setParams] = useState(samples.params ?? "");
   const [dtsx, setDtsx] = useState(samples.ssis);
+  const [item, setItem] = useState(samples.talend);
   const [fileName, setFileName] = useState<string | null>(null);
   const [dialect, setDialect] = useState("teradata");
   const [over, setOver] = useState(false);
@@ -35,20 +36,25 @@ export function ImportDialog({ mode: initialMode, samples, busy, error, onImport
     if (d && !d.open) d.showModal();
   }, []);
 
-  const text = mode === "sql" ? sql : mode === "ssis" ? dtsx : xml;
+  const text = mode === "sql" ? sql : mode === "ssis" ? dtsx : mode === "talend" ? item : xml;
   const readFile = async (f: File) => {
     const content = await f.text();
     const isSsis = /\.dtsx$/i.test(f.name) || content.slice(0, 4000).includes("www.microsoft.com/SqlServer/Dts");
+    const isTalend = /\.item$/i.test(f.name) || /talendfile:ProcessType|TalendFile\.xsd/.test(content.slice(0, 4000));
     const isXml = /\.xml$/i.test(f.name) || content.trimStart().startsWith("<");
     setFileName(f.name);
     if (isSsis) { setMode("ssis"); setDtsx(content); }
+    else if (isTalend) { setMode("talend"); setItem(content); }
     else if (isXml) { setMode("powercenter"); setXml(content); }
     else { setMode("sql"); setSql(content); }
   };
 
   return (
     <dialog ref={ref} className="dialog" onClose={onClose} aria-labelledby="import-title">
-      <form method="dialog" onSubmit={(e) => { e.preventDefault(); onImport(mode, text, dialect, params); }}>
+      <form method="dialog" onSubmit={(e) => {
+        e.preventDefault();
+        onImport(mode, text, dialect, mode === "talend" ? (fileName ?? "j_order_revenue.item").replace(/\.item$/i, "") : params);
+      }}>
         <div className="dialog-head">
           <div>
             <h2 id="import-title">Import a legacy job</h2>
@@ -70,6 +76,10 @@ export function ImportDialog({ mode: initialMode, samples, busy, error, onImport
               <span className="mi-icon"><Boxes /></span>
               <span><b>SSIS package</b><span>Data flows and control flow from a .dtsx, with a migration scorecard</span></span>
             </button>
+            <button type="button" className="mode-card" aria-pressed={mode === "talend"} onClick={() => setMode("talend")}>
+              <span className="mi-icon"><Network /></span>
+              <span><b>Talend job</b><span>tMap, lookups, filters and outputs from a .item, with a migration scorecard</span></span>
+            </button>
           </div>
           <div
             className={`drop${over ? " is-over" : ""}`}
@@ -79,11 +89,12 @@ export function ImportDialog({ mode: initialMode, samples, busy, error, onImport
           >
             <span className="mi-icon"><FileUp /></span>
             <div>
-              <b>{fileName ?? (mode === "sql" ? "Drop a .sql file" : mode === "ssis" ? "Drop an SSIS .dtsx package" : "Drop a PowerCenter .xml export")}</b>
+              <b>{fileName ?? (mode === "sql" ? "Drop a .sql file" : mode === "ssis" ? "Drop an SSIS .dtsx package"
+                : mode === "talend" ? "Drop a Talend job (.item)" : "Drop a PowerCenter .xml export")}</b>
               <p>{fileName ? "Loaded below. Review it, then import." : "Or edit the sample below, an invented job built for this demo."}</p>
             </div>
             <button type="button" className="btn sm" onClick={() => file.current?.click()}>Choose file</button>
-            <input ref={file} type="file" accept=".sql,.txt,.bteq,.xml,.dtsx" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) readFile(f); }} />
+            <input ref={file} type="file" accept=".sql,.txt,.bteq,.xml,.dtsx,.item" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) readFile(f); }} />
           </div>
           {mode === "sql" ? (
             <>
@@ -98,6 +109,11 @@ export function ImportDialog({ mode: initialMode, samples, busy, error, onImport
                 <textarea className="code-input tall" value={sql} spellCheck={false} onChange={(e) => setSql(e.target.value)} />
               </label>
             </>
+          ) : mode === "talend" ? (
+            <label className="field">
+              <span>Job (.item, a Standard job exported from Talend Studio)</span>
+              <textarea className="code-input tall" value={item} spellCheck={false} onChange={(e) => setItem(e.target.value)} aria-label="Talend job" />
+            </label>
           ) : mode === "ssis" ? (
             <label className="field">
               <span>Package (.dtsx, SSIS 2012 or later)</span>

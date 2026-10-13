@@ -318,6 +318,22 @@ await step("an SSIS package imports with its data flow and control flow", async 
   await shot(page, "15-ssis");
 });
 
+await step("a Talend job imports with its tMap lookups, rejects and scorecard", async () => {
+  await page.locator(".topbar").getByRole("button", { name: "Examples" }).click();
+  await page.getByRole("menuitem", { name: /Talend job/ }).click();
+  await page.waitForSelector("dialog[open]");
+  assert.match(await page.getByLabel("Talend job").inputValue(), /componentName="tMap"/);
+  await page.locator("dialog").getByRole("button", { name: "Import", exact: true }).click();
+  await page.waitForSelector("dialog[open]", { state: "detached" });
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="revenue_by_region"] .step-rows')?.textContent === "2 rows", null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="map_orders_unknown_customers"] .step-rows')?.textContent === "1 row");
+  await page.waitForSelector(".score-hero");
+  const items = await page.locator(".score-item .name").allTextContents();
+  assert.ok(items.includes("tMap_1") && items.includes("tJava_1"), items.join(", "));
+  assert.equal(await page.getByLabel("Variable fx_rate").inputValue(), "1.0");
+  await shot(page, "15b-talend");
+});
+
 await step("a data model shows as a diagram, exports DDL and Mermaid, and imports DDL", async () => {
   await page.locator(".topbar").getByRole("button", { name: "Examples" }).click();
   await page.getByRole("menuitem", { name: /^sales Kimball/ }).click();

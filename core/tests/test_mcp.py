@@ -126,6 +126,8 @@ def test_import_legacy_proposes_a_new_spec(server):
     assert not (server.root / "pipelines").exists()
     ok(server, "apply_edit", proposal_id=prop["proposal_id"])
     assert ok(server, "describe_pipeline", spec="pipelines/customer_revenue.yaml")["issues"] == []
+    talend = ok(server, "import_legacy", source="examples/legacy/talend/j_order_revenue.item", out="pipelines/talend.yaml")
+    assert "Migration scorecard: j_order_revenue" in talend["scorecard"] and talend["can_apply"]
 
 
 def test_stdio(tmp_path):

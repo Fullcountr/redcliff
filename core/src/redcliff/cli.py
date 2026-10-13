@@ -3,6 +3,7 @@
     redcliff import legacy.sql --dialect teradata --schema schema.json -o pipeline.yaml
     redcliff import mapping.xml -o pipeline.yaml --scorecard scorecard.md   (Informatica PowerCenter)
     redcliff import package.dtsx -o pipeline.yaml --scorecard scorecard.md  (SSIS)
+    redcliff import job.item -o pipeline.yaml --scorecard scorecard.md  (Talend)
     redcliff validate pipeline.yaml
     redcliff compile pipeline.yaml --to spark
     redcliff compile pipeline.yaml --to dbt -o my_dbt_project       (or --to lakeflow)
@@ -72,12 +73,15 @@ def _err(message: str) -> None:
 
 
 def _import_file(path: str, args, name: str | None = None):
-    """Import legacy SQL, a PowerCenter export or an SSIS package (the format is detected)."""
+    """Import legacy SQL, a PowerCenter export, an SSIS package or a Talend job (the format is detected)."""
     text_in = Path(path).read_text(encoding="utf-8")
     from redcliff.ssis import import_ssis, is_ssis
+    from redcliff.talend import import_talend, is_talend
 
     if is_ssis(text_in, path):
         return import_ssis(text_in, name=name)
+    if is_talend(text_in, path):
+        return import_talend(text_in, name=name or Path(path).stem)
     if path.lower().endswith(".xml") or text_in.lstrip().startswith("<"):
         params = Path(args.params).read_text(encoding="utf-8") if getattr(args, "params", None) else None
         return import_powercenter(text_in, mapping=getattr(args, "mapping", None) or None, name=name, params=params)
@@ -224,8 +228,10 @@ def cmd_run(args) -> int:
         if any(not r.passed and r.expectation.severity == "error" for r in results):
             _err("not writing: an expectation failed (see above); fix the data or pass --skip-checks")
             return 1
-    for target in (n for n in pipeline.nodes if n.type == "target" and n.params["format"] != "table"):
-        (base / target.params["path"]).parent.mkdir(parents=True, exist_ok=True)
+    from redcliff.spec import bind
+
+    for target in (n for n in bind(pipeline).nodes if n.type == "target" and n.params["format"] != "table"):
+        (base / target.params["path"]).parent.mkdir(parents=True, exist_ok=True)  # paths with variables filled in
     emitter = None
     if args.openlineage:
         import os
@@ -251,7 +257,7 @@ def cmd_run(args) -> int:
         return 1
     if emitter:
         emit("COMPLETE")
-    targets = [n.params.get("table") or n.params.get("path") for n in pipeline.nodes if n.type == "target"]
+    targets = [n.params.get("table") or n.params.get("path") for n in bind(pipeline).nodes if n.type == "target"]
     print(f"ran {pipeline.name}: wrote {', '.join(targets)}")
     return 0
 
@@ -645,8 +651,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"redcliff {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("import", help="turn legacy SQL, a PowerCenter export or an SSIS package into a pipeline spec")
-    p.add_argument("sql", help="SQL file (one or more statements), a PowerCenter XML export or an SSIS .dtsx")
+    p = sub.add_parser("import", help="turn legacy SQL, a PowerCenter export, an SSIS package or a Talend job into a "
+                                      "pipeline spec")
+    p.add_argument("sql", help="SQL file (one or more statements), a PowerCenter XML export, an SSIS .dtsx or a "
+                               "Talend job (.item)")
     p.add_argument("--dialect", help="sqlglot dialect, e.g. teradata, oracle, tsql, snowflake")
     p.add_argument("--schema", help="JSON/YAML mapping of table -> {column: type}")
     p.add_argument("--name", help="pipeline name (default: the file name)")
@@ -725,8 +733,9 @@ def build_parser() -> argparse.ArgumentParser:
                                      "import (DDL, DBML), generate the pipeline that loads it, test the loaded tables")
     p.add_argument("action", choices=["validate", "export", "import", "propose", "map", "pipeline", "test"])
     p.add_argument("file", nargs="+", help="model.yaml to validate or export; a .sql or .dbml file to import; "
-                                           "CSV or Parquet files, or a legacy job (SQL, PowerCenter XML, SSIS .dtsx "
-                                           "or a pipeline spec), to propose a model from; for map, the model then the job")
+                                           "CSV or Parquet files, or a legacy job (SQL, PowerCenter XML, SSIS .dtsx, "
+                                           "Talend .item or a pipeline spec), to propose a model from; "
+                                           "for map, the model then the job")
     p.add_argument("--to", choices=["ddl", "dbml", "mermaid", "dbt"], default="ddl", help="export format")
     p.add_argument("--dialect", help="SQL dialect for DDL export or import (default: duckdb)")
     p.add_argument("--name", help="model name for an import or propose; pipeline name for pipeline")

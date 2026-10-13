@@ -239,7 +239,7 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
                     config.append(f"schema='{_table_name(p['table'])[0]}'")
             elif adapter == "duckdb":
                 config += ["materialized='external'", f"location={p['path']!r}", f"format='{p['format']}'"]
-                folder = Path(p["path"]).parent
+                folder = Path(pipeline.node(node.id).params["path"]).parent  # with variables at their defaults
                 if str(folder) not in ("", ".") and not folder.is_absolute() and ".." not in folder.parts:
                     files[f"{folder.as_posix()}/.gitkeep"] = ""  # DuckDB writes files but not folders
             else:

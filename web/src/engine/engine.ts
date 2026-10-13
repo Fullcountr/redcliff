@@ -52,6 +52,7 @@ export const engine = {
   importSql: (sql: string, dialect: string, schema: Record<string, Record<string, string>>, name: string) =>
     call<ImportResult>("import_sql", sql, dialect, JSON.stringify(schema), name),
   importSsis: (xml: string) => call<ImportResult>("import_ssis", xml),
+  importTalend: (xml: string, name: string) => call<ImportResult>("import_talend", xml, name),
   importPowercenter: (xml: string, params?: string) => call<ImportResult>("import_powercenter", xml, null, params || null),
   impact: (spec: Spec, node: string, column: string) => call<Impact>("impact", json(spec), node, column),
   diff: (base: Spec, head: Spec) => call<Record<string, unknown>>("diff", json(base), json(head)),

@@ -22,8 +22,9 @@ from redcliff.compile import compile_query  # noqa: E402
 from redcliff.dbt import compile_dbt, write_dbt_project  # noqa: E402
 from redcliff.importer import import_sql  # noqa: E402
 from redcliff.powercenter import import_powercenter  # noqa: E402
-from redcliff.spec import Pipeline  # noqa: E402
+from redcliff.spec import Pipeline, bind  # noqa: E402
 from redcliff.ssis import import_ssis  # noqa: E402
+from redcliff.talend import import_talend  # noqa: E402
 
 ROOT = Path(__file__).parents[2]
 DATA = ROOT / "examples" / "data"
@@ -71,6 +72,8 @@ PIPELINES = {
         (PC / "wf_customer_revenue.xml").read_text(), params=(PC / "wf_customer_revenue.par").read_text()).pipeline),
     "wf_store_mart": lambda: import_powercenter((PC / "wf_store_mart.xml").read_text()).pipeline,
     "ssis_region_revenue": lambda: import_ssis((ROOT / "examples/legacy/ssis/LoadRegionRevenue.dtsx").read_text()).pipeline,
+    "talend_order_revenue": lambda: import_talend(  # tMap lookups (filtered, inner with rejects), merge
+        (ROOT / "examples/legacy/talend/j_order_revenue.item").read_text(), name="j_order_revenue").pipeline,
 }
 
 
@@ -97,7 +100,7 @@ def test_dbt_build_matches_the_compiled_pipeline(tmp_path, monkeypatch, name):
     reference = duckdb.connect()
     create_tables(reference)
     with duckdb.connect(str(db)) as built:  # dbt still holds a connection, so same settings
-        for target in (n for n in pipeline.nodes if n.type == "target"):
+        for target in (n for n in bind(pipeline).nodes if n.type == "target"):  # paths with variables filled in
             want = norm(reference.execute(compile_query(pipeline, target.inputs[0], "duckdb", SPECS)).fetchall())
             p = target.params
             if p["format"] == "table":

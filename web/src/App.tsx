@@ -4,7 +4,7 @@ import {
 } from "@xyflow/react";
 import {
   BookOpen, Boxes, ChevronDown, CircleCheck, FileCode2, FileSpreadsheet, Layers, Lock, Maximize, Minus,
-  Monitor, Moon, MousePointerClick, Plus, Share2, Sparkles, Sun, Upload, WandSparkles, Waypoints, Workflow,
+  Monitor, Moon, MousePointerClick, Network, Plus, Share2, Sparkles, Sun, Upload, WandSparkles, Waypoints, Workflow,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { data } from "./engine/data";
@@ -29,6 +29,7 @@ type Samples = {
   workflow: { xml: string; params: string };
   storeMart: string;
   ssis: string;
+  talend: string;
   precomputed: Record<string, Precomputed>;
 };
 type EngineState = { state: "loading" | "ready" | "failed"; ms?: number; error?: string };
@@ -380,7 +381,7 @@ export default function App() {
     setExample("");
     setImporting({ mode: null, busy: false, error: null });
     const c = r.scorecard.counts;
-    if (r.scorecard.origin === "powercenter") {
+    if (r.scorecard.origin === "powercenter" || r.scorecard.origin === "talend") {
       setTab("migration");
       say(`${label}: ${r.spec.nodes.length} steps, ${Math.round(r.scorecard.automated * 100)}% converted automatically`);
     } else {
@@ -395,12 +396,15 @@ export default function App() {
       ? await engine.importPowercenter(text, params)
       : mode === "ssis"
         ? await engine.importSsis(text)
-        : await engine.importSql(text, dialect, await dataLoaded.current!.then(data.schema, () => ({})), "imported");
+        : mode === "talend"
+          ? await engine.importTalend(text, params)
+          : await engine.importSql(text, dialect, await dataLoaded.current!.then(data.schema, () => ({})), "imported");
     if (!r.ok) {
       setImporting((s) => ({ ...s, mode, busy: false, error: r.error }));
       return;
     }
-    loaded(r, mode === "powercenter" ? "Imported the mapping" : mode === "ssis" ? "Imported the package" : "Imported the SQL");
+    loaded(r, mode === "powercenter" ? "Imported the mapping" : mode === "ssis" ? "Imported the package"
+      : mode === "talend" ? "Imported the job" : "Imported the SQL");
   };
 
   const loadExample = (name: string) => {
@@ -568,6 +572,8 @@ export default function App() {
                   onClick={() => { close(); setImporting({ mode: "powercenter", busy: false, error: null, sample: "store" }); }} />
                 <MenuItem icon={Boxes} title="SSIS package" sub="Split, merge join, lookup, aggregate"
                   onClick={() => { close(); setImporting({ mode: "ssis", busy: false, error: null }); }} />
+                <MenuItem icon={Network} title="Talend job" sub="tMap lookups and rejects, aggregates, upsert"
+                  onClick={() => { close(); setImporting({ mode: "talend", busy: false, error: null }); }} />
               </>
             )}
           </Menu>
@@ -600,6 +606,8 @@ export default function App() {
                   onClick={() => { close(); setImporting({ mode: "powercenter", busy: false, error: null }); }} />
                 <MenuItem icon={Boxes} title="SSIS package" sub=".dtsx data flows, with a migration scorecard"
                   onClick={() => { close(); setView("pipeline"); setImporting({ mode: "ssis", busy: false, error: null }); }} />
+                <MenuItem icon={Network} title="Talend job" sub=".item jobs, with a migration scorecard"
+                  onClick={() => { close(); setView("pipeline"); setImporting({ mode: "talend", busy: false, error: null }); }} />
                 <div className="menu-sep" />
                 <MenuItem icon={Layers} title="Data model" sub="Propose one from your data, or paste DDL or DBML"
                   onClick={() => { close(); openModel(null, "import"); }} />
@@ -695,10 +703,10 @@ export default function App() {
         <ImportDialog
           mode={importing.mode}
           samples={(importing.sample === "workflow"
-            ? { sql: samples.legacy, powercenter: samples.workflow.xml, params: samples.workflow.params, ssis: samples.ssis }
+            ? { sql: samples.legacy, powercenter: samples.workflow.xml, params: samples.workflow.params, ssis: samples.ssis, talend: samples.talend }
             : importing.sample === "store"
-              ? { sql: samples.legacy, powercenter: samples.storeMart, ssis: samples.ssis }
-              : { sql: samples.legacy, powercenter: samples.powercenter, ssis: samples.ssis }) satisfies ImportSamples}
+              ? { sql: samples.legacy, powercenter: samples.storeMart, ssis: samples.ssis, talend: samples.talend }
+              : { sql: samples.legacy, powercenter: samples.powercenter, ssis: samples.ssis, talend: samples.talend }) satisfies ImportSamples}
           busy={importing.busy}
           error={importing.error}
           onImport={doImport}

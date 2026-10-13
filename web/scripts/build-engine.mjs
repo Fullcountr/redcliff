@@ -71,7 +71,9 @@ const workflow = { xml: readFileSync(join(pcDir, "wf_customer_revenue.xml"), "ut
   params: readFileSync(join(pcDir, "wf_customer_revenue.par"), "utf8") };
 const storeMart = readFileSync(join(pcDir, "wf_store_mart.xml"), "utf8");
 const ssis = readFileSync(join(repo, "examples", "legacy", "ssis", "LoadRegionRevenue.dtsx"), "utf8");
-writeFileSync(join(samples, "samples.json"), JSON.stringify({ tables, specs, models, legacy, powercenter, workflow, storeMart, ssis }, null, 2));
+const talend = readFileSync(join(repo, "examples", "legacy", "talend", "j_order_revenue.item"), "utf8");
+writeFileSync(join(samples, "samples.json"),
+  JSON.stringify({ tables, specs, models, legacy, powercenter, workflow, storeMart, ssis, talend }, null, 2));
 
 // 5. Precomputed lineage, row counts and blast radius for the examples, so the canvas is
 //    interactive while Python and DuckDB load. Optional: needs sqlglot and duckdb in $PYTHON.

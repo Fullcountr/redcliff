@@ -1,0 +1,360 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Invented example for Redcliff, not from any real system: a Talend Open Studio job export (.item).
+     Orders are deduplicated and filtered, joined to customers we can email (inner, with a reject flow
+     for the rest) and regions (left outer) in a tMap, then aggregated two ways: revenue by region
+     (replacing the table each run) and activity per customer (insert or update). -->
+<talendfile:ProcessType xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:TalendMapper="http://www.talend.org/mapper" xmlns:talendfile="platform:/resource/org.talend.model/model/TalendFile.xsd" xmi:version="2.0" defaultContext="Default" jobType="Standard">
+  <context confirmationNeeded="false" name="Default">
+    <contextParameter comment="Orders below this amount are left out" name="minAmount" prompt="minAmount?" promptNeeded="false" type="id_BigDecimal" value="0"/>
+    <contextParameter comment="Order currency to USD" name="fxRate" prompt="fxRate?" promptNeeded="false" type="id_Double" value="1.0"/>
+    <contextParameter comment="" name="outDir" prompt="outDir?" promptNeeded="false" type="id_Directory" value="out"/>
+  </context>
+  <parameters>
+    <elementParameter field="TEXT" name="JOB_RUN_VM_ARGUMENTS" value=" -Xms256M -Xmx1024M"/>
+  </parameters>
+
+  <!-- before the job: open the shared connection -->
+  <node componentName="tPrejob" componentVersion="0.101" offsetLabelX="0" offsetLabelY="0" posX="64" posY="32">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tPrejob_1" show="false"/>
+  </node>
+  <node componentName="tMysqlConnection" componentVersion="0.102" offsetLabelX="0" offsetLabelY="0" posX="224" posY="32">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlConnection_1" show="false"/>
+    <elementParameter field="TEXT" name="HOST" value="&quot;db.example.internal&quot;"/>
+    <elementParameter field="TEXT" name="DBNAME" value="&quot;sales&quot;"/>
+  </node>
+
+  <!-- orders -->
+  <node componentName="tMysqlInput" componentVersion="0.102" offsetLabelX="0" offsetLabelY="0" posX="64" posY="192">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlInput_1" show="false"/>
+    <elementParameter field="CHECK" name="USE_EXISTING_CONNECTION" value="true"/>
+    <elementParameter field="DBTABLE" name="TABLE" value="&quot;orders&quot;"/>
+    <elementParameter field="MEMO_SQL" name="QUERY" value="&quot;SELECT order_id, customer_id, order_date, status, amount FROM orders&quot;"/>
+    <metadata connector="FLOW" name="tMysqlInput_1">
+      <column key="true" length="10" name="order_id" nullable="false" pattern="" precision="0" sourceType="INT" type="id_Integer"/>
+      <column key="false" length="10" name="customer_id" nullable="true" pattern="" precision="0" sourceType="INT" type="id_Integer"/>
+      <column key="false" length="10" name="order_date" nullable="true" pattern="&quot;yyyy-MM-dd&quot;" precision="0" sourceType="DATE" type="id_Date"/>
+      <column key="false" length="20" name="status" nullable="true" pattern="" precision="0" sourceType="VARCHAR" type="id_String"/>
+      <column key="false" length="10" name="amount" nullable="true" pattern="" precision="2" sourceType="DECIMAL" type="id_BigDecimal"/>
+    </metadata>
+  </node>
+  <node componentName="tUniqRow" componentVersion="0.102" offsetLabelX="0" offsetLabelY="0" posX="224" posY="192">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tUniqRow_1" show="false"/>
+    <elementParameter field="TEXT" name="LABEL" value="one_row_per_order"/>
+    <elementParameter field="TABLE" name="UNIQUE_KEY">
+      <elementValue elementRef="SCHEMA_COLUMN" value="order_id"/>
+      <elementValue elementRef="KEY_ATTRIBUTE" value="true"/>
+      <elementValue elementRef="CASE_SENSITIVE" value="false"/>
+      <elementValue elementRef="SCHEMA_COLUMN" value="customer_id"/>
+      <elementValue elementRef="KEY_ATTRIBUTE" value="false"/>
+      <elementValue elementRef="CASE_SENSITIVE" value="false"/>
+      <elementValue elementRef="SCHEMA_COLUMN" value="order_date"/>
+      <elementValue elementRef="KEY_ATTRIBUTE" value="false"/>
+      <elementValue elementRef="CASE_SENSITIVE" value="false"/>
+      <elementValue elementRef="SCHEMA_COLUMN" value="status"/>
+      <elementValue elementRef="KEY_ATTRIBUTE" value="false"/>
+      <elementValue elementRef="CASE_SENSITIVE" value="false"/>
+      <elementValue elementRef="SCHEMA_COLUMN" value="amount"/>
+      <elementValue elementRef="KEY_ATTRIBUTE" value="false"/>
+      <elementValue elementRef="CASE_SENSITIVE" value="false"/>
+    </elementParameter>
+    <metadata connector="UNIQUE" name="tUniqRow_1">
+      <column key="true" length="10" name="order_id" nullable="false" pattern="" precision="0" type="id_Integer"/>
+      <column key="false" length="10" name="customer_id" nullable="true" pattern="" precision="0" type="id_Integer"/>
+      <column key="false" length="10" name="order_date" nullable="true" pattern="&quot;yyyy-MM-dd&quot;" precision="0" type="id_Date"/>
+      <column key="false" length="20" name="status" nullable="true" pattern="" precision="0" type="id_String"/>
+      <column key="false" length="10" name="amount" nullable="true" pattern="" precision="2" type="id_BigDecimal"/>
+    </metadata>
+  </node>
+  <node componentName="tFilterRow" componentVersion="0.102" offsetLabelX="0" offsetLabelY="0" posX="384" posY="192">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tFilterRow_1" show="false"/>
+    <elementParameter field="TEXT" name="LABEL" value="live_orders"/>
+    <elementParameter field="CLOSED_LIST" name="LOGICAL_OP" value="&amp;&amp;"/>
+    <elementParameter field="TABLE" name="CONDITIONS">
+      <elementValue elementRef="INPUT_COLUMN" value="status"/>
+      <elementValue elementRef="FUNCTION" value=""/>
+      <elementValue elementRef="OPERATOR" value="!="/>
+      <elementValue elementRef="RVALUE" value="&quot;cancelled&quot;"/>
+      <elementValue elementRef="INPUT_COLUMN" value="amount"/>
+      <elementValue elementRef="FUNCTION" value=""/>
+      <elementValue elementRef="OPERATOR" value="&gt;"/>
+      <elementValue elementRef="RVALUE" value="context.minAmount"/>
+    </elementParameter>
+    <elementParameter field="CHECK" name="USE_ADVANCED" value="false"/>
+    <elementParameter field="MEMO_JAVA" name="ADVANCED_COND" value="input_row.amount != null"/>
+    <metadata connector="FLOW" name="tFilterRow_1">
+      <column key="true" length="10" name="order_id" nullable="false" pattern="" precision="0" type="id_Integer"/>
+      <column key="false" length="10" name="customer_id" nullable="true" pattern="" precision="0" type="id_Integer"/>
+      <column key="false" length="10" name="order_date" nullable="true" pattern="&quot;yyyy-MM-dd&quot;" precision="0" type="id_Date"/>
+      <column key="false" length="20" name="status" nullable="true" pattern="" precision="0" type="id_String"/>
+      <column key="false" length="10" name="amount" nullable="true" pattern="" precision="2" type="id_BigDecimal"/>
+    </metadata>
+  </node>
+  <node componentName="tLogRow" componentVersion="0.102" offsetLabelX="0" offsetLabelY="0" posX="384" posY="320">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tLogRow_1" show="false"/>
+    <elementParameter field="RADIO" name="TABLE_PRINT" value="true"/>
+  </node>
+
+  <!-- lookups -->
+  <node componentName="tMysqlInput" componentVersion="0.102" offsetLabelX="0" offsetLabelY="0" posX="544" posY="64">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlInput_2" show="false"/>
+    <elementParameter field="CHECK" name="USE_EXISTING_CONNECTION" value="true"/>
+    <elementParameter field="DBTABLE" name="TABLE" value="&quot;customers&quot;"/>
+    <elementParameter field="MEMO_SQL" name="QUERY" value="&quot;SELECT id, first_name, last_name, email, region FROM customers&quot;"/>
+    <metadata connector="FLOW" name="tMysqlInput_2">
+      <column key="true" length="10" name="id" nullable="false" pattern="" precision="0" sourceType="INT" type="id_Integer"/>
+      <column key="false" length="50" name="first_name" nullable="true" pattern="" precision="0" sourceType="VARCHAR" type="id_String"/>
+      <column key="false" length="50" name="last_name" nullable="true" pattern="" precision="0" sourceType="VARCHAR" type="id_String"/>
+      <column key="false" length="100" name="email" nullable="true" pattern="" precision="0" sourceType="VARCHAR" type="id_String"/>
+      <column key="false" length="20" name="region" nullable="true" pattern="" precision="0" sourceType="VARCHAR" type="id_String"/>
+    </metadata>
+  </node>
+  <node componentName="tMysqlInput" componentVersion="0.102" offsetLabelX="0" offsetLabelY="0" posX="544" posY="352">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlInput_3" show="false"/>
+    <elementParameter field="CHECK" name="USE_EXISTING_CONNECTION" value="true"/>
+    <elementParameter field="DBTABLE" name="TABLE" value="&quot;regions&quot;"/>
+    <elementParameter field="MEMO_SQL" name="QUERY" value="&quot;SELECT region, manager FROM regions&quot;"/>
+    <metadata connector="FLOW" name="tMysqlInput_3">
+      <column key="true" length="20" name="region" nullable="false" pattern="" precision="0" sourceType="VARCHAR" type="id_String"/>
+      <column key="false" length="50" name="manager" nullable="true" pattern="" precision="0" sourceType="VARCHAR" type="id_String"/>
+    </metadata>
+  </node>
+
+  <!-- the mapping -->
+  <node componentName="tMap" componentVersion="2.1" offsetLabelX="0" offsetLabelY="0" posX="704" posY="192">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMap_1" show="false"/>
+    <elementParameter field="TEXT" name="LABEL" value="map_orders"/>
+    <metadata connector="FLOW" name="out_orders">
+      <column key="true" length="10" name="order_id" nullable="false" pattern="" precision="0" type="id_Integer"/>
+      <column key="false" length="10" name="customer_id" nullable="true" pattern="" precision="0" type="id_Integer"/>
+      <column key="false" length="101" name="customer_name" nullable="true" pattern="" precision="0" type="id_String"/>
+      <column key="false" length="20" name="region" nullable="true" pattern="" precision="0" type="id_String"/>
+      <column key="false" length="50" name="manager" nullable="true" pattern="" precision="0" type="id_String"/>
+      <column key="false" length="7" name="order_month" nullable="true" pattern="" precision="0" type="id_String"/>
+      <column key="false" length="12" name="amount_usd" nullable="true" pattern="" precision="2" type="id_BigDecimal"/>
+      <column key="false" length="1" name="is_large" nullable="true" pattern="" precision="0" type="id_Integer"/>
+    </metadata>
+    <metadata connector="FLOW" name="unknown_customers">
+      <column key="true" length="10" name="order_id" nullable="false" pattern="" precision="0" type="id_Integer"/>
+      <column key="false" length="10" name="customer_id" nullable="true" pattern="" precision="0" type="id_Integer"/>
+      <column key="false" length="10" name="amount" nullable="true" pattern="" precision="2" type="id_BigDecimal"/>
+    </metadata>
+    <nodeData xsi:type="TalendMapper:MapperData">
+      <uiProperties shellMaximized="false"/>
+      <varTables sizeState="INTERMEDIATE" name="Var" minimized="true">
+        <mapperTableEntries name="amount_usd" expression="row3.amount.multiply(new BigDecimal(context.fxRate))" type="id_BigDecimal"/>
+      </varTables>
+      <outputTables sizeState="INTERMEDIATE" name="out_orders">
+        <mapperTableEntries name="order_id" expression="row3.order_id" type="id_Integer" nullable="false"/>
+        <mapperTableEntries name="customer_id" expression="row3.customer_id" type="id_Integer"/>
+        <mapperTableEntries name="customer_name" expression="row4.first_name + &quot; &quot; + row4.last_name" type="id_String"/>
+        <mapperTableEntries name="region" expression="row4.region" type="id_String"/>
+        <mapperTableEntries name="manager" expression="row5.manager == null ? &quot;UNASSIGNED&quot; : row5.manager" type="id_String"/>
+        <mapperTableEntries name="order_month" expression="TalendDate.formatDate(&quot;yyyy-MM&quot;, row3.order_date)" type="id_String"/>
+        <mapperTableEntries name="amount_usd" expression="Var.amount_usd" type="id_BigDecimal"/>
+        <mapperTableEntries name="is_large" expression="Var.amount_usd.compareTo(new BigDecimal(100)) &gt;= 0 ? 1 : 0" type="id_Integer"/>
+      </outputTables>
+      <outputTables sizeState="INTERMEDIATE" name="unknown_customers" reject="false" rejectInnerJoin="true">
+        <mapperTableEntries name="order_id" expression="row3.order_id" type="id_Integer" nullable="false"/>
+        <mapperTableEntries name="customer_id" expression="row3.customer_id" type="id_Integer"/>
+        <mapperTableEntries name="amount" expression="row3.amount" type="id_BigDecimal"/>
+      </outputTables>
+      <inputTables sizeState="INTERMEDIATE" name="row3" matchingMode="UNIQUE_MATCH" lookupMode="LOAD_ONCE">
+        <mapperTableEntries name="order_id" type="id_Integer" nullable="false"/>
+        <mapperTableEntries name="customer_id" type="id_Integer"/>
+        <mapperTableEntries name="order_date" type="id_Date"/>
+        <mapperTableEntries name="status" type="id_String"/>
+        <mapperTableEntries name="amount" type="id_BigDecimal"/>
+      </inputTables>
+      <inputTables sizeState="INTERMEDIATE" name="row4" matchingMode="UNIQUE_MATCH" lookupMode="LOAD_ONCE" innerJoin="true" activateExpressionFilter="true" expressionFilter="row4.email != null">
+        <mapperTableEntries name="id" expression="row3.customer_id" type="id_Integer" nullable="false"/>
+        <mapperTableEntries name="first_name" type="id_String"/>
+        <mapperTableEntries name="last_name" type="id_String"/>
+        <mapperTableEntries name="email" type="id_String"/>
+        <mapperTableEntries name="region" type="id_String"/>
+      </inputTables>
+      <inputTables sizeState="INTERMEDIATE" name="row5" matchingMode="UNIQUE_MATCH" lookupMode="LOAD_ONCE">
+        <mapperTableEntries name="region" expression="row4.region.toUpperCase()" type="id_String" nullable="false"/>
+        <mapperTableEntries name="manager" type="id_String"/>
+      </inputTables>
+    </nodeData>
+  </node>
+  <node componentName="tReplicate" componentVersion="0.101" offsetLabelX="0" offsetLabelY="0" posX="864" posY="192">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tReplicate_1" show="false"/>
+  </node>
+
+  <!-- revenue by region, replaced every run -->
+  <node componentName="tAggregateRow" componentVersion="0.102" offsetLabelX="0" offsetLabelY="0" posX="1024" posY="128">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tAggregateRow_1" show="false"/>
+    <elementParameter field="TEXT" name="LABEL" value="revenue_by_region"/>
+    <elementParameter field="TABLE" name="GROUPBYS">
+      <elementValue elementRef="OUTPUT_COLUMN" value="region"/>
+      <elementValue elementRef="INPUT_COLUMN" value="region"/>
+      <elementValue elementRef="OUTPUT_COLUMN" value="manager"/>
+      <elementValue elementRef="INPUT_COLUMN" value="manager"/>
+    </elementParameter>
+    <elementParameter field="TABLE" name="OPERATIONS">
+      <elementValue elementRef="OUTPUT_COLUMN" value="revenue"/>
+      <elementValue elementRef="FUNCTION" value="sum"/>
+      <elementValue elementRef="INPUT_COLUMN" value="amount_usd"/>
+      <elementValue elementRef="IGNORE_NULL" value="false"/>
+      <elementValue elementRef="OUTPUT_COLUMN" value="order_count"/>
+      <elementValue elementRef="FUNCTION" value="count"/>
+      <elementValue elementRef="INPUT_COLUMN" value="order_id"/>
+      <elementValue elementRef="IGNORE_NULL" value="false"/>
+      <elementValue elementRef="OUTPUT_COLUMN" value="large_orders"/>
+      <elementValue elementRef="FUNCTION" value="sum"/>
+      <elementValue elementRef="INPUT_COLUMN" value="is_large"/>
+      <elementValue elementRef="IGNORE_NULL" value="false"/>
+    </elementParameter>
+    <metadata connector="FLOW" name="tAggregateRow_1">
+      <column key="false" length="20" name="region" nullable="true" pattern="" precision="0" type="id_String"/>
+      <column key="false" length="50" name="manager" nullable="true" pattern="" precision="0" type="id_String"/>
+      <column key="false" length="14" name="revenue" nullable="true" pattern="" precision="2" type="id_BigDecimal"/>
+      <column key="false" length="10" name="order_count" nullable="true" pattern="" precision="0" type="id_Integer"/>
+      <column key="false" length="10" name="large_orders" nullable="true" pattern="" precision="0" type="id_Integer"/>
+    </metadata>
+  </node>
+  <node componentName="tSortRow" componentVersion="0.102" offsetLabelX="0" offsetLabelY="0" posX="1184" posY="128">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tSortRow_1" show="false"/>
+    <elementParameter field="TABLE" name="CRITERIA">
+      <elementValue elementRef="COLNAME" value="revenue"/>
+      <elementValue elementRef="SORT" value="num"/>
+      <elementValue elementRef="ORDER" value="desc"/>
+    </elementParameter>
+  </node>
+  <node componentName="tMysqlOutput" componentVersion="0.102" offsetLabelX="0" offsetLabelY="0" posX="1344" posY="128">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlOutput_1" show="false"/>
+    <elementParameter field="CHECK" name="USE_EXISTING_CONNECTION" value="true"/>
+    <elementParameter field="DBTABLE" name="TABLE" value="&quot;region_revenue&quot;"/>
+    <elementParameter field="CLOSED_LIST" name="TABLE_ACTION" value="DROP_CREATE"/>
+    <elementParameter field="CLOSED_LIST" name="DATA_ACTION" value="INSERT"/>
+    <metadata connector="FLOW" name="tMysqlOutput_1">
+      <column key="false" length="20" name="region" nullable="true" pattern="" precision="0" type="id_String"/>
+      <column key="false" length="50" name="manager" nullable="true" pattern="" precision="0" type="id_String"/>
+      <column key="false" length="14" name="revenue" nullable="true" pattern="" precision="2" type="id_BigDecimal"/>
+      <column key="false" length="10" name="order_count" nullable="true" pattern="" precision="0" type="id_Integer"/>
+      <column key="false" length="10" name="large_orders" nullable="true" pattern="" precision="0" type="id_Integer"/>
+    </metadata>
+  </node>
+
+  <!-- activity per customer, insert or update on customer_id -->
+  <node componentName="tAggregateRow" componentVersion="0.102" offsetLabelX="0" offsetLabelY="0" posX="1024" posY="288">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tAggregateRow_2" show="false"/>
+    <elementParameter field="TEXT" name="LABEL" value="activity_by_customer"/>
+    <elementParameter field="TABLE" name="GROUPBYS">
+      <elementValue elementRef="OUTPUT_COLUMN" value="customer_id"/>
+      <elementValue elementRef="INPUT_COLUMN" value="customer_id"/>
+    </elementParameter>
+    <elementParameter field="TABLE" name="OPERATIONS">
+      <elementValue elementRef="OUTPUT_COLUMN" value="last_month"/>
+      <elementValue elementRef="FUNCTION" value="max"/>
+      <elementValue elementRef="INPUT_COLUMN" value="order_month"/>
+      <elementValue elementRef="IGNORE_NULL" value="true"/>
+      <elementValue elementRef="OUTPUT_COLUMN" value="total_usd"/>
+      <elementValue elementRef="FUNCTION" value="sum"/>
+      <elementValue elementRef="INPUT_COLUMN" value="amount_usd"/>
+      <elementValue elementRef="IGNORE_NULL" value="false"/>
+      <elementValue elementRef="OUTPUT_COLUMN" value="orders"/>
+      <elementValue elementRef="FUNCTION" value="count"/>
+      <elementValue elementRef="INPUT_COLUMN" value="order_id"/>
+      <elementValue elementRef="IGNORE_NULL" value="false"/>
+    </elementParameter>
+    <metadata connector="FLOW" name="tAggregateRow_2">
+      <column key="true" length="10" name="customer_id" nullable="false" pattern="" precision="0" type="id_Integer"/>
+      <column key="false" length="7" name="last_month" nullable="true" pattern="" precision="0" type="id_String"/>
+      <column key="false" length="14" name="total_usd" nullable="true" pattern="" precision="2" type="id_BigDecimal"/>
+      <column key="false" length="10" name="orders" nullable="true" pattern="" precision="0" type="id_Integer"/>
+    </metadata>
+  </node>
+  <node componentName="tMysqlOutput" componentVersion="0.102" offsetLabelX="0" offsetLabelY="0" posX="1184" posY="288">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlOutput_2" show="false"/>
+    <elementParameter field="CHECK" name="USE_EXISTING_CONNECTION" value="true"/>
+    <elementParameter field="DBTABLE" name="TABLE" value="&quot;customer_activity&quot;"/>
+    <elementParameter field="CLOSED_LIST" name="TABLE_ACTION" value="CREATE_IF_NOT_EXISTS"/>
+    <elementParameter field="CLOSED_LIST" name="DATA_ACTION" value="INSERT_OR_UPDATE"/>
+    <metadata connector="FLOW" name="tMysqlOutput_2">
+      <column key="true" length="10" name="customer_id" nullable="false" pattern="" precision="0" type="id_Integer"/>
+      <column key="false" length="7" name="last_month" nullable="true" pattern="" precision="0" type="id_String"/>
+      <column key="false" length="14" name="total_usd" nullable="true" pattern="" precision="2" type="id_BigDecimal"/>
+      <column key="false" length="10" name="orders" nullable="true" pattern="" precision="0" type="id_Integer"/>
+    </metadata>
+  </node>
+
+  <!-- orders whose customer is unknown, to a file -->
+  <node componentName="tFileOutputDelimited" componentVersion="0.101" offsetLabelX="0" offsetLabelY="0" posX="864" posY="384">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tFileOutputDelimited_1" show="false"/>
+    <elementParameter field="FILE" name="FILENAME" value="context.outDir + &quot;/unknown_customers.csv&quot;"/>
+    <elementParameter field="TEXT" name="FIELDSEPARATOR" value="&quot;,&quot;"/>
+    <elementParameter field="CHECK" name="INCLUDEHEADER" value="true"/>
+    <elementParameter field="CHECK" name="APPEND" value="false"/>
+    <metadata connector="FLOW" name="tFileOutputDelimited_1">
+      <column key="true" length="10" name="order_id" nullable="false" pattern="" precision="0" type="id_Integer"/>
+      <column key="false" length="10" name="customer_id" nullable="true" pattern="" precision="0" type="id_Integer"/>
+      <column key="false" length="10" name="amount" nullable="true" pattern="" precision="2" type="id_BigDecimal"/>
+    </metadata>
+  </node>
+
+  <!-- after the job -->
+  <node componentName="tSendMail" componentVersion="0.102" offsetLabelX="0" offsetLabelY="0" posX="64" posY="480">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tSendMail_1" show="false"/>
+    <elementParameter field="TEXT" name="SUBJECT" value="&quot;Order revenue loaded&quot;"/>
+  </node>
+  <node componentName="tJava" componentVersion="0.101" offsetLabelX="0" offsetLabelY="0" posX="224" posY="480">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tJava_1" show="false"/>
+    <elementParameter field="MEMO_JAVA" name="CODE" value="System.out.println(&quot;rows: &quot; + globalMap.get(&quot;tMysqlOutput_1_NB_LINE&quot;));"/>
+  </node>
+  <node componentName="tPostjob" componentVersion="0.101" offsetLabelX="0" offsetLabelY="0" posX="64" posY="576">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tPostjob_1" show="false"/>
+  </node>
+  <node componentName="tMysqlClose" componentVersion="0.102" offsetLabelX="0" offsetLabelY="0" posX="224" posY="576">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlClose_1" show="false"/>
+  </node>
+
+  <connection connectorName="SUBJOB_OK" label="OnSubjobOk" lineStyle="1" metaname="tPrejob_1" offsetLabelX="0" offsetLabelY="0" source="tPrejob_1" target="tMysqlConnection_1"/>
+  <connection connectorName="FLOW" label="row1" lineStyle="0" metaname="tMysqlInput_1" offsetLabelX="0" offsetLabelY="0" source="tMysqlInput_1" target="tUniqRow_1">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="row1" show="false"/>
+  </connection>
+  <connection connectorName="UNIQUE" label="row2" lineStyle="0" metaname="tUniqRow_1" offsetLabelX="0" offsetLabelY="0" source="tUniqRow_1" target="tFilterRow_1">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="row2" show="false"/>
+  </connection>
+  <connection connectorName="FILTER" label="row3" lineStyle="0" metaname="tFilterRow_1" offsetLabelX="0" offsetLabelY="0" source="tFilterRow_1" target="tMap_1">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="row3" show="false"/>
+  </connection>
+  <connection connectorName="REJECT" label="rejected" lineStyle="0" metaname="REJECT" offsetLabelX="0" offsetLabelY="0" source="tFilterRow_1" target="tLogRow_1">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="rejected" show="false"/>
+  </connection>
+  <connection connectorName="FLOW" label="row4" lineStyle="8" metaname="tMysqlInput_2" offsetLabelX="0" offsetLabelY="0" source="tMysqlInput_2" target="tMap_1">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="row4" show="false"/>
+  </connection>
+  <connection connectorName="FLOW" label="row5" lineStyle="8" metaname="tMysqlInput_3" offsetLabelX="0" offsetLabelY="0" source="tMysqlInput_3" target="tMap_1">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="row5" show="false"/>
+  </connection>
+  <connection connectorName="FLOW" label="out_orders" lineStyle="0" metaname="out_orders" offsetLabelX="0" offsetLabelY="0" source="tMap_1" target="tReplicate_1">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="out_orders" show="false"/>
+  </connection>
+  <connection connectorName="FLOW" label="unknown_customers" lineStyle="0" metaname="unknown_customers" offsetLabelX="0" offsetLabelY="0" source="tMap_1" target="tFileOutputDelimited_1">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="unknown_customers" show="false"/>
+  </connection>
+  <connection connectorName="FLOW" label="row6" lineStyle="0" metaname="tReplicate_1" offsetLabelX="0" offsetLabelY="0" source="tReplicate_1" target="tAggregateRow_1">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="row6" show="false"/>
+  </connection>
+  <connection connectorName="FLOW" label="row7" lineStyle="0" metaname="tReplicate_1" offsetLabelX="0" offsetLabelY="0" source="tReplicate_1" target="tAggregateRow_2">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="row7" show="false"/>
+  </connection>
+  <connection connectorName="FLOW" label="row8" lineStyle="0" metaname="tAggregateRow_1" offsetLabelX="0" offsetLabelY="0" source="tAggregateRow_1" target="tSortRow_1">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="row8" show="false"/>
+  </connection>
+  <connection connectorName="FLOW" label="row9" lineStyle="0" metaname="tSortRow_1" offsetLabelX="0" offsetLabelY="0" source="tSortRow_1" target="tMysqlOutput_1">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="row9" show="false"/>
+  </connection>
+  <connection connectorName="FLOW" label="row10" lineStyle="0" metaname="tAggregateRow_2" offsetLabelX="0" offsetLabelY="0" source="tAggregateRow_2" target="tMysqlOutput_2">
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="row10" show="false"/>
+  </connection>
+  <connection connectorName="SUBJOB_OK" label="OnSubjobOk" lineStyle="1" metaname="tMysqlInput_1" offsetLabelX="0" offsetLabelY="0" source="tMysqlInput_1" target="tSendMail_1"/>
+  <connection connectorName="COMPONENT_OK" label="OnComponentOk" lineStyle="3" metaname="tSendMail_1" offsetLabelX="0" offsetLabelY="0" source="tSendMail_1" target="tJava_1"/>
+  <connection connectorName="SUBJOB_OK" label="OnSubjobOk" lineStyle="1" metaname="tPostjob_1" offsetLabelX="0" offsetLabelY="0" source="tPostjob_1" target="tMysqlClose_1"/>
+
+  <subjob>
+    <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlInput_1"/>
+  </subjob>
+</talendfile:ProcessType>

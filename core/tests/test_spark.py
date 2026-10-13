@@ -34,8 +34,9 @@ from redcliff.compile import compile_pyspark, compile_query, compile_script  # n
 from redcliff.importer import import_sql  # noqa: E402
 from redcliff.informatica import translate  # noqa: E402
 from redcliff.powercenter import import_powercenter  # noqa: E402
-from redcliff.spec import Pipeline  # noqa: E402
+from redcliff.spec import Pipeline, bind  # noqa: E402
 from redcliff.ssis import import_ssis  # noqa: E402
+from redcliff.talend import import_talend  # noqa: E402
 
 ROOT = Path(__file__).parents[2]
 DATA = ROOT / "examples" / "data"
@@ -151,6 +152,16 @@ def workflow() -> Pipeline:
                               params=(pc / "wf_customer_revenue.par").read_text()).pipeline
 
 
+def without_merge(pipeline: Pipeline) -> Pipeline:
+    """Plain Spark tables have no MERGE (Delta does); test_spark_parses_merge_statements covers the statement."""
+    data = pipeline.to_dict()
+    for n in data["nodes"]:
+        if n["type"] == "target" and n["params"].get("mode") == "merge":
+            n["params"]["mode"] = "overwrite"
+            n["params"].pop("keys", None)
+    return Pipeline.from_dict(data)
+
+
 PIPELINES = {
     "orders_revenue": lambda: example("orders_revenue"),
     "customer_cleanup": lambda: example("customer_cleanup"),
@@ -162,6 +173,8 @@ PIPELINES = {
         (ROOT / "examples" / "legacy" / "powercenter" / "wf_store_mart.xml").read_text()).pipeline,
     "ssis_region_revenue": lambda: import_ssis(  # conditional split, merge join (null-safe), lookup
         (ROOT / "examples" / "legacy" / "ssis" / "LoadRegionRevenue.dtsx").read_text()).pipeline,
+    "talend_order_revenue": lambda: without_merge(import_talend(  # tMap lookups (filtered, inner with rejects)
+        (ROOT / "examples/legacy/talend/j_order_revenue.item").read_text(), name="j_order_revenue").pipeline),
 }
 
 
@@ -201,7 +214,7 @@ def test_spark_sql_script_writes_every_target(spark, duck, workdir, name):
                 .write.saveAsTable(table)
     for statement in _statements(compile_script(pipeline, "spark", workdir)):
         spark.sql(statement)
-    for target in (n for n in pipeline.nodes if n.type == "target"):
+    for target in (n for n in bind(pipeline).nodes if n.type == "target"):  # paths with variables filled in
         p = target.params
         written = (spark.table(p["table"]) if p["format"] == "table" else
                    spark.read.option("header", True).option("inferSchema", True).csv(str(workdir / p["path"]))

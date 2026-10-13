@@ -29,6 +29,7 @@ from redcliff.lakeflow import compile_lakeflow  # noqa: E402
 from redcliff.powercenter import import_powercenter  # noqa: E402
 from redcliff.spec import Pipeline  # noqa: E402
 from redcliff.ssis import import_ssis  # noqa: E402
+from redcliff.talend import import_talend  # noqa: E402
 from test_dbt import TABLES, create_tables, norm  # noqa: E402
 
 ROOT = Path(__file__).parents[2]
@@ -53,6 +54,8 @@ PIPELINES = {
                                                       params=(PC / "wf_customer_revenue.par").read_text()).pipeline,
     "wf_store_mart": lambda: import_powercenter((PC / "wf_store_mart.xml").read_text()).pipeline,
     "ssis_region_revenue": lambda: import_ssis((ROOT / "examples/legacy/ssis/LoadRegionRevenue.dtsx").read_text()).pipeline,
+    "talend_order_revenue": lambda: import_talend(  # tMap lookups (filtered, inner with rejects), merge
+        (ROOT / "examples/legacy/talend/j_order_revenue.item").read_text(), name="j_order_revenue").pipeline,
 }
 
 # Stand-ins for the warehouse tables that table sources read in place.
@@ -80,6 +83,8 @@ def test_lakeflow_pipeline_runs_and_matches_duckdb(tmp_path, name):
     create_tables(reference)
     for target in (n for n in pipeline.nodes if n.type == "target"):
         table = target.params["table"].split(".")[-1] if target.params["format"] == "table" else target.id
+        if target.params.get("mode") in ("merge", "scd1", "scd2", "insert_new", "insert_changed"):
+            table += "_incoming"  # the pipeline computes the rows; the MERGE runs as a job task
         got = duckdb.sql(f"SELECT * FROM read_parquet('{tmp_path}/spark-warehouse/{table}/*.parquet')").fetchall()
         want = reference.execute(compile_query(pipeline, target.inputs[0], "duckdb", SPECS)).fetchall()
         assert norm(got) == norm(want), f"{name}: {target.id}"
