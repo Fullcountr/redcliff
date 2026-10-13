@@ -5,7 +5,7 @@ roadmap in the README tracks progress.
 
 ## The idea
 
-Today Redcliff describes how data moves. A model describes what it should become. When someone adds
+Today Redcliff™ describes how data moves. A model describes what it should become. When someone adds
 a file, Redcliff profiles it, proposes a model (Kimball or Data Vault 2.0, their choice), lets them
 adjust it lightly on the canvas, and generates the pipelines that load it. Lineage then ends at named
 business attributes (`dim_customer.segment`) instead of output columns.

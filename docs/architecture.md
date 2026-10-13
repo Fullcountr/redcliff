@@ -1,6 +1,6 @@
 # Architecture
 
-Redcliff has one source of truth: the **pipeline spec**, a YAML/JSON document stored in Git.
+Redcliff™ has one source of truth: the **pipeline spec**, a YAML/JSON document stored in Git.
 
 ```
 Writers                      Source of truth            Readers

@@ -1,6 +1,6 @@
 # Pipeline spec reference (version 0)
 
-A Redcliff pipeline is a YAML or JSON document. It is the single source of truth: the canvas
+A Redcliff™ pipeline is a YAML or JSON document. It is the single source of truth: the canvas
 edits it, and code and lineage are generated from it. Editors can use
 [`core/src/redcliff/pipeline.schema.json`](../core/src/redcliff/pipeline.schema.json) for
 autocomplete; the Python validator adds checks a schema can't express.

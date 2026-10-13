@@ -40,7 +40,7 @@ equivalent (UPDATE, DELETE, DROP) are skipped with a warning.
 The `join` node keeps the left side's column when both sides share a name. When the SQL
 references the right side's copy (`a.event_time` while `w.event_time` also exists), the
 importer first adds a `derive` that renames it (`a_event_time`), so no value is lost.
-Pass `schema` so this check is exact; without it, Redcliff warns that clashes can't be checked.
+Pass `schema` so this check is exact; without it, Redcliff™ warns that clashes can't be checked.
 
 ## How it's tested
 

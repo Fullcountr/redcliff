@@ -1,4 +1,4 @@
-# Contributing to Redcliff
+# Contributing to Redcliff™
 
 Thanks for your interest. Redcliff is in early development, so the best contributions
 right now are bug reports, sample SQL that the importer should handle, and small,

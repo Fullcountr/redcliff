@@ -2,7 +2,7 @@
   <img src="docs/images/logo.svg" width="72" alt="">
 </p>
 
-<h1 align="center">Redcliff</h1>
+<h1 align="center">Redcliff™</h1>
 
 <p align="center">
   <strong>Legacy ETL in, clean Spark out.</strong><br>
@@ -712,3 +712,6 @@ browser, [React Flow](https://reactflow.dev/) for the canvas and
 ## License
 
 [Apache License 2.0](LICENSE).
+
+Redcliff™ and the Redcliff logo are trademarks of the Redcliff project. The Apache License covers
+the code, not the name or logo (section 6), so forks are welcome under a name of their own.

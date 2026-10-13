@@ -1,4 +1,4 @@
-# Redcliff for VS Code
+# Redcliff™ for VS Code
 
 The extension in [`vscode/`](../vscode) shows a pipeline spec as a canvas beside its YAML. The YAML
 stays the source of truth: edit it and the canvas follows as you type.

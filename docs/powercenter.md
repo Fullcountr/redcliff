@@ -100,7 +100,7 @@ note. A `$$PARAM` used in SQL with no value anywhere makes that transformation *
 parameter file with `--params` (or in the playground's import dialog).
 
 A folder export with several mappings becomes **one pipeline**. When one mapping reads a table
-another one writes, Redcliff connects them, so lineage runs across the whole folder. Use
+another one writes, Redcliff™ connects them, so lineage runs across the whole folder. Use
 `--mapping NAME` (repeatable) to import only some mappings.
 
 ## The expression language

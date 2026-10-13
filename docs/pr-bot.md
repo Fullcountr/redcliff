@@ -58,7 +58,7 @@ can't reach other files or the network.
 
 ## The pull request bot
 
-Add this workflow to a repository that keeps Redcliff specs:
+Add this workflow to a repository that keeps Redcliff™ specs:
 
 ```yaml
 name: Pipeline diff

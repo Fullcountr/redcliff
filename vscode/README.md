@@ -1,4 +1,4 @@
-# Redcliff for VS Code
+# Redcliff™ for VS Code
 
 See a [Redcliff](https://github.com/Fullcountr/redcliff) pipeline spec as a canvas next to its YAML.
 The YAML stays the source of truth: edit it and the canvas follows as you type.
