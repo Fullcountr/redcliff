@@ -693,8 +693,13 @@ export default function App() {
           <div className="boot-card">
             <div className="boot-mark" aria-hidden="true"><span /><span /><span /></div>
             <h1>The engine didn't start</h1>
-            <p className="error">{eng.error}</p>
-            <p>Redcliff needs a recent browser with WebAssembly. Reloading the page usually helps.</p>
+            <p className="error" data-testid="engine-error">{(eng.error ?? "").replace(/^(Error: )+/, "").replace(/^blocked: /, "").replace(/^./, (c) => c.toUpperCase())}</p>
+            {eng.error?.includes("blocked: ") ? (
+              <p>A firewall or proxy on this network stopped the download; work networks often do. Try
+                another network (a phone hotspot works), or ask your IT team to allow this site.</p>
+            ) : (
+              <p>Redcliff needs a recent browser with WebAssembly. Reloading the page usually helps.</p>
+            )}
           </div>
         </div>
       )}

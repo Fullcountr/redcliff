@@ -24,12 +24,13 @@ for (const f of ["pyodide.mjs", "pyodide.asm.mjs", "pyodide.asm.wasm", "python_s
   copyFileSync(join(web, "node_modules", "pyodide", f), join(pyo, f));
 }
 
-// 2. The redcliff package as a zip with redcliff/ at its root
+// 2. The redcliff package as a zip with redcliff/ at its root. Both packages are served as .bin:
+//    some corporate web filters refuse .zip and .whl downloads, and Python reads them the same.
 const engine = fresh(join(pub, "engine"));
 execFileSync(python, ["-c", `
 import pathlib, zipfile
 src = pathlib.Path(${JSON.stringify(join(repo, "core", "src"))})
-with zipfile.ZipFile(${JSON.stringify(join(engine, "redcliff.zip"))}, "w", zipfile.ZIP_DEFLATED) as z:
+with zipfile.ZipFile(${JSON.stringify(join(engine, "redcliff.bin"))}, "w", zipfile.ZIP_DEFLATED) as z:
     for f in sorted((src / "redcliff").rglob("*")):
         if f.suffix in (".py", ".json"):
             z.write(f, f.relative_to(src).as_posix())
@@ -40,7 +41,7 @@ const tmp = fresh(join(engine, "tmp"));
 execFileSync(python, ["-m", "pip", "download", "sqlglot>=30", "--no-deps", "--only-binary=:all:",
   "--quiet", "-d", tmp], { stdio: "inherit" });
 const wheel = readdirSync(tmp).find((f) => f.startsWith("sqlglot-") && f.endsWith(".whl"));
-renameSync(join(tmp, wheel), join(engine, "sqlglot.whl"));
+renameSync(join(tmp, wheel), join(engine, "sqlglot.bin"));
 rmSync(tmp, { recursive: true, force: true });
 writeFileSync(join(engine, "manifest.json"), JSON.stringify({ sqlglot: wheel }, null, 2));
 
@@ -90,4 +91,4 @@ try {
   console.warn(`precompute ${precomputed}: ${String(e.stderr || e).split("\n").filter(Boolean).pop()}`);
 }
 
-console.log(`engine ready: pyodide, ${wheel}, redcliff.zip, ${tables.length} sample tables, ${Object.keys(specs).length} specs, ${precomputed}`);
+console.log(`engine ready: pyodide, ${wheel}, redcliff.bin, ${tables.length} sample tables, ${Object.keys(specs).length} specs, ${precomputed}`);

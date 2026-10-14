@@ -10,15 +10,23 @@ async function boot(): Promise<number> {
   const base = new URL(import.meta.env.BASE_URL, self.location.origin).href;
   const { loadPyodide } = await import(/* @vite-ignore */ `${base}pyodide/pyodide.mjs`);
   const py = await loadPyodide({ indexURL: `${base}pyodide/` });
-  for (const file of ["sqlglot.whl", "redcliff.zip"]) {
-    const res = await fetch(`${base}engine/${file}`);
-    if (!res.ok) throw new Error(`could not load ${file} (${res.status})`);
+  for (const file of ["sqlglot.bin", "redcliff.bin"]) {
+    let res: Response;
+    try {
+      res = await fetch(`${base}engine/${file}`);
+    } catch {
+      throw new Error(`blocked: couldn't download engine/${file}; is the network up?`);
+    }
+    if ([401, 403, 407, 451].includes(res.status)) {
+      throw new Error(`blocked: the network refused engine/${file} (HTTP ${res.status})`);
+    }
+    if (!res.ok) throw new Error(`could not load engine/${file} (HTTP ${res.status})`);
     py.FS.writeFile(`/tmp/${file}`, new Uint8Array(await res.arrayBuffer()));
   }
   py.runPython(`
 import site, zipfile
 target = site.getsitepackages()[0]
-for f in ("/tmp/sqlglot.whl", "/tmp/redcliff.zip"):
+for f in ("/tmp/sqlglot.bin", "/tmp/redcliff.bin"):
     zipfile.ZipFile(f).extractall(target)
 import redcliff.web
 `);
@@ -30,7 +38,7 @@ const ready = boot();
 
 ready.then(
   (ms) => self.postMessage({ type: "ready", ms }),
-  (err) => self.postMessage({ type: "failed", error: String(err) }),
+  (err) => self.postMessage({ type: "failed", error: err instanceof Error ? err.message : String(err) }),
 );
 
 self.onmessage = async (event: MessageEvent<{ id: number; fn: string; args: unknown[] }>) => {
