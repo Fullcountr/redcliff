@@ -178,8 +178,11 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
         for n in seeds:
             lines.append(f"  - name: {n.id}")
             lines.append(f"    description: {_yaml_str(_jinja_literal('Loaded from ' + _one_line(n.params['path'])))}")
-            if n.params.get("columns"):
+            if n.params.get("columns") or n.params.get("delimiter"):
                 lines.append("    config:")
+            if n.params.get("delimiter"):
+                lines.append(f"      delimiter: {json.dumps(n.params['delimiter'])}")
+            if n.params.get("columns"):
                 lines.append("      column_types:")
                 lines += [f"        {c}: {exp.DataType.build(t).sql(dialect)}" for c, t in n.params["columns"].items()]
             if base_dir is not None:
@@ -189,12 +192,12 @@ def compile_dbt(pipeline: Pipeline, adapter: str = "duckdb", base_dir: str | Pat
         files["seeds/seeds.yml"] = "\n".join(lines) + "\n"
 
     for n in pipeline.nodes:
-        if n.type == "source" and n.params["format"] == "parquet":
-            path = n.params["path"]
-            read = f"read_parquet({_literal(path)})" if dialect == "duckdb" else \
-                f"parquet.`{path.replace('`', '``')}`"
+        if n.type == "source" and n.params["format"] in ("parquet", "json"):
+            path, fmt = n.params["path"], n.params["format"]
+            read = (f"read_{'parquet' if fmt == 'parquet' else 'json_auto'}({_literal(path)})" if dialect == "duckdb"
+                    else f"{fmt}.`{path.replace('`', '``')}`")
             view = "{{ config(materialized='view') }}\n" if n.expect else ""
-            files[f"models/{model_name[n.id]}.sql"] = f"-- {n.id}: source (parquet)\n{view}SELECT * FROM {_jinja_literal(read)}\n"
+            files[f"models/{model_name[n.id]}.sql"] = f"-- {n.id}: source ({fmt})\n{view}SELECT * FROM {_jinja_literal(read)}\n"
 
     # ------------------------------------------------------------------ steps and targets
     docs = ["version: 2", "models:"]

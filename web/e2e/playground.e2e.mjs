@@ -6,7 +6,7 @@
 // PowerCenter import with its scorecard, data preview, generated code and share links.
 // Screenshots go to SCREENSHOT_DIR if set.
 import assert from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { chromium } from "playwright-core";
 
 const url = process.env.APP_URL || "http://localhost:4173/";
@@ -464,6 +464,45 @@ await step("a CSV source in a pipeline can be modelled, and a model travels in a
   await other.goto(link);
   await other.waitForSelector('[data-testid="entity-fct_order_lines"]', { timeout: 60000 });
   await other.close();
+});
+
+await step("Add file reads TSV, Parquet, JSON and Excel, and routes a legacy job to the import", async () => {
+  const fixture = (name, as = name) => ({ name: as, mimeType: "application/octet-stream",
+    buffer: readFileSync(new URL(`./fixtures/${name}`, import.meta.url)) });
+  await page.locator(".topbar").getByRole("tab", { name: "Pipeline" }).click();
+  await page.locator(".topbar").getByRole("button", { name: "Examples" }).click();
+  await page.getByRole("menuitem", { name: /orders revenue/ }).click();
+  await page.locator('[data-testid="add-file"]').setInputFiles([
+    csv("skus.tsv", "sku\tlabel\tprice\nA\tLamp, desk\t3.50\nB\tMug\t7.25\n"),
+    { name: "events.ndjson", mimeType: "application/x-ndjson", buffer: Buffer.from('{"id": 1, "kind": "view"}\n{"id": 2, "kind": "buy"}\n') },
+    fixture("products.parquet", "catalog.parquet"), fixture("stores.xlsx"),
+  ]);
+  await page.waitForSelector('[data-testid="sheet-dialog"]');
+  assert.match(await page.locator('[data-testid="sheet-dialog"]').innerText(), /stores[\s\S]*targets/);
+  assert.doesNotMatch(await page.locator('[data-testid="sheet-dialog"]').innerText(), /notes/);  // an empty sheet
+  await shot(page, "18-sheets");
+  await page.locator('[data-testid="add-sheets"]').click();
+  for (const [node, n] of [["skus", 2], ["events", 2], ["catalog", 3], ["stores_stores", 3], ["stores_targets", 4]]) {
+    await page.waitForFunction(([id, rows]) => document.querySelector(`.react-flow__node[data-id="${id}"] .step-rows`)?.textContent === `${rows} rows`,
+      [node, n], { timeout: 30000 });
+  }
+  await page.locator('.react-flow__node[data-id="skus"] .step-id').click();
+  assert.match(await page.locator("textarea.code-input").inputValue(), /delimiter: "\\t"/);
+  await page.locator(".react-flow__pane").click({ position: { x: 700, y: 820 } });  // the whole pipeline's code
+  await page.getByRole("tab", { name: "Code" }).click();
+  await page.getByRole("button", { name: "PySpark", exact: true }).click();
+  await page.waitForFunction(() => /spark\.read\.parquet\('catalog\.parquet'\)/.test(document.querySelector(".code-block")?.textContent ?? ""));
+  assert.match(await page.locator(".code-block").textContent(), /spark\.read\.schema\('id BIGINT, kind STRING'\)\.json\('events\.ndjson'\)/);
+  assert.match(await page.locator(".code-block").textContent(), /stores_targets = spark\.table\('stores_targets'\)/);
+  await shot(page, "18b-file-sources");
+
+  await page.locator('[data-testid="add-file"]').setInputFiles([csv("notes.pdf", "%PDF-1.4")]);
+  await page.waitForFunction(() => /notes\.pdf isn't a file Redcliff reads/.test(document.querySelector(".toast")?.textContent ?? ""));
+  await page.locator('[data-testid="add-file"]').setInputFiles([csv("job.sql", "CREATE TABLE out_t AS SELECT region, COUNT(*) AS n FROM customers GROUP BY region;")]);
+  await page.waitForSelector("dialog[open]");
+  assert.match(await page.locator("dialog textarea").first().inputValue(), /CREATE TABLE out_t/);
+  await page.locator("dialog").getByRole("button", { name: "Close" }).click();
+  await page.waitForSelector("dialog[open]", { state: "detached" });
 });
 
 await step("works on a phone-sized screen and in dark mode", async () => {

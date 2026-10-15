@@ -21,7 +21,7 @@ from sqlglot import exp
 
 from redcliff.columns import infer_columns
 from redcliff.expect import expectations
-from redcliff.compile import variables_note, _dataframe, _doc_text, _one_line, _path, _statement, _transpile, _type_sql
+from redcliff.compile import spark_reader, variables_note, _dataframe, _doc_text, _one_line, _path, _statement, _transpile
 from redcliff.spec import Pipeline, bind
 
 
@@ -98,13 +98,7 @@ def compile_lakeflow(pipeline: Pipeline, base_dir: str | Path | None = None,
                     continue  # read in place: steps refer to the table by this name
                 body = f"spark.read.table({p['table']!r})"
             else:
-                reader = "spark.read"
-                if p["format"] == "csv":
-                    reader += '.option("header", True)'
-                    if p.get("columns"):
-                        ddl = ", ".join(f"{c} {_type_sql(ty, 'spark')}" for c, ty in p["columns"].items())
-                        reader += f".schema({ddl!r})"
-                body = f"{reader}.{p['format']}({_path(node, base_dir)!r})"
+                body = f"{spark_reader(p)}.{p['format']}({_path(node, base_dir)!r})"
             lines += ["", "", *expect_lines(node), f"@dp.temporary_view(name={dataset[node.id]!r})",
                       f"def {fn}() -> DataFrame:", f'    """{node.id}: source"""', f"    return {body}"]
         elif t == "target":

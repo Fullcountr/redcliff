@@ -19,6 +19,7 @@ per key, no overlapping versions, facts pointing at real versions) are :func:`mo
 
 from __future__ import annotations
 
+import contextvars
 import os
 from pathlib import Path
 from typing import Any
@@ -45,17 +46,52 @@ def _rel(entity_source: str, model_dir: Path, spec_dir: Path) -> str:
     return os.path.relpath((model_dir / entity_source).resolve(), spec_dir.resolve()).replace(os.sep, "/")
 
 
-def _csv_header(path: Path) -> list[str] | None:
-    """A CSV file's column names, when it exists and they're all plain names."""
-    import csv
+FILE_FORMATS = {".csv": "csv", ".tsv": "csv", ".txt": "csv", ".parquet": "parquet",
+                ".json": "json", ".jsonl": "json", ".ndjson": "json"}
 
-    try:
-        with open(path, newline="", encoding="utf-8") as f:
-            header = next(csv.reader(f), None)
-    except OSError:
-        return None
-    names = [h.strip() for h in header or []]
+# Files the caller already knows (the browser: its files' columns and separators), by path or name.
+_KNOWN: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar("known_files", default=None)
+
+
+def _plain(names: list[str]) -> list[str] | None:
+    names = [n.strip() for n in names]
     return names if names and all(ID_PATTERN.match(n) for n in names) and len(set(names)) == len(names) else None
+
+
+def _file_info(path: Path, src: str) -> tuple[list[str] | None, str | None]:
+    """A file's column names (when they're all plain names) and, for delimited text, its separator."""
+    known = _KNOWN.get() or {}
+    entry = known.get(src) or known.get(Path(src).name)
+    if entry is not None:
+        if isinstance(entry, dict):
+            return _plain(list(entry.get("columns") or [])), entry.get("delimiter")
+        return _plain(list(entry)), None
+    fmt = FILE_FORMATS.get(path.suffix.lower())
+    if fmt == "csv":
+        import csv
+
+        try:
+            with open(path, newline="", encoding="utf-8") as f:
+                first = f.readline()
+        except OSError:
+            return None, None
+        delimiter = "\t" if path.suffix.lower() == ".tsv" else max(",\t|;", key=first.count)
+        if not first.count(delimiter):
+            delimiter = ","
+        names = _plain(next(csv.reader([first], delimiter=delimiter), []))
+        return names, None if delimiter == "," else delimiter
+    if fmt in ("parquet", "json") and path.exists():
+        try:
+            import duckdb
+        except ImportError:
+            return None, None
+        read = "read_parquet" if fmt == "parquet" else "read_json_auto"
+        literal = "'" + str(path).replace("'", "''") + "'"
+        try:
+            return _plain([r[0] for r in duckdb.connect().execute(f"DESCRIBE SELECT * FROM {read}({literal})").fetchall()]), None
+        except duckdb.Error:
+            return None, None
+    return None, None
 
 
 def _source_nodes(e: Entity, model_dir: Path, spec_dir: Path) -> list[dict]:
@@ -72,14 +108,19 @@ def _source_node(e: Entity, src: str, node_id: str, model_dir: Path, spec_dir: P
     """The source step for one of an entity's files or tables. CSV columns are declared from the file's
     header (typed like the attributes they map to, else varchar; the
     staging step casts them), so lineage runs from the file's columns to the model's attributes."""
-    suffix = Path(src).suffix.lower()
-    if suffix in (".csv", ".parquet"):
-        params: dict[str, Any] = {"format": suffix[1:], "path": _rel(src, model_dir, spec_dir)}
-        header = _csv_header(model_dir / src) if suffix == ".csv" else None
+    fmt = FILE_FORMATS.get(Path(src).suffix.lower())
+    if fmt:
+        params: dict[str, Any] = {"format": fmt, "path": _rel(src, model_dir, spec_dir)}
+        header, delimiter = _file_info(model_dir / src, src)
+        if delimiter:
+            params["delimiter"] = delimiter
         if header:
             params["columns"] = {c: _raw_type(e, c) for c in header}
     else:
         params = {"format": "table", "table": src}
+        header, _ = _file_info(model_dir / src, src) if src in (_KNOWN.get() or {}) else (None, None)
+        if header:
+            params["columns"] = {c: _raw_type(e, c) for c in header}
     return {"id": node_id, "type": "source", "params": params}
 
 
@@ -128,8 +169,19 @@ def _md5(parts: list[str]) -> str:
 
 
 def model_pipeline(model: Model, model_dir: str | Path = ".", spec_dir: str | Path | None = None,
-                   name: str | None = None) -> Pipeline:
-    """The pipeline that loads ``model``. Paths are written relative to ``spec_dir`` (default: ``model_dir``)."""
+                   name: str | None = None, files: dict[str, Any] | None = None) -> Pipeline:
+    """The pipeline that loads ``model``. Paths are written relative to ``spec_dir`` (default: ``model_dir``).
+
+    ``files`` describes files the caller knows that may not be on disk (the browser's): by path or
+    name, their column names, or ``{"columns": [...], "delimiter": "\\t"}``."""
+    token = _KNOWN.set(dict(files or {}))
+    try:
+        return _model_pipeline(model, model_dir, spec_dir, name)
+    finally:
+        _KNOWN.reset(token)
+
+
+def _model_pipeline(model: Model, model_dir, spec_dir, name) -> Pipeline:
     issues = validate_model(model)
     if issues:
         raise SpecError(issues)

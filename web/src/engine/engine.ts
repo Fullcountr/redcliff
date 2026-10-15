@@ -97,7 +97,7 @@ export const engine = {
   modelFromJob: (spec: Spec, style: "kimball" | "data_vault") =>
     call<{ model: DataModel; reasons: Record<string, string[]>; map: JobMap }>("model_from_job", JSON.stringify(spec), style),
   modelMap: (model: DataModel, spec: Spec) => call<JobMap>("model_map", JSON.stringify(model), JSON.stringify(spec)),
-  modelLoadPipeline: (model: DataModel, headers?: Record<string, string[]>) =>
+  modelLoadPipeline: (model: DataModel, headers?: Record<string, { columns: string[]; delimiter?: string }>) =>
     call<{ spec: Spec; targets: string[] }>("model_load_pipeline", JSON.stringify(model), JSON.stringify(headers ?? {})),
   modelImport: (text: string, fmt: "ddl" | "dbml", dialect: string | null, name: string) =>
     call<{ model: DataModel; warnings: string[] }>("model_import", text, fmt, dialect, name),

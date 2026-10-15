@@ -4,19 +4,26 @@ import { data } from "./engine/data";
 import { engine } from "./engine/engine";
 import type { DataModel, ModelEntity, ModelExtension } from "./model";
 
-export type TableInfo = { name: string; file: string; sample: boolean; columns: Record<string, string> };
+export type TableInfo = {
+  name: string; file: string; sample: boolean; columns: Record<string, string>;
+  format: "csv" | "parquet" | "json" | "table"; delimiter?: string; original: string;
+};
 
 /** Every table the playground has: yours first, then the samples. */
 export async function listTables(): Promise<TableInfo[]> {
   const [schema, files] = await Promise.all([data.schema(), data.files()]);
   return Object.entries(schema)
-    .map(([name, columns]) => ({ name, columns, file: files[name]?.file ?? `${name}.csv`, sample: files[name]?.sample ?? true }))
+    .map(([name, columns]) => ({
+      name, columns, file: files[name]?.file ?? `${name}.csv`, sample: files[name]?.sample ?? true,
+      format: files[name]?.format ?? "csv", delimiter: files[name]?.delimiter, original: files[name]?.original ?? name,
+    }))
     .sort((a, b) => Number(a.sample) - Number(b.sample) || a.name.localeCompare(b.name));
 }
 
-/** Each CSV file's column names, so a model's load declares them as the CLI's does. */
-export async function csvHeaders(): Promise<Record<string, string[]>> {
-  return Object.fromEntries((await listTables()).map((t) => [t.file, Object.keys(t.columns)]));
+/** Each file's column names (and a CSV's separator), so a model's load declares them as the CLI's does. */
+export async function csvHeaders(): Promise<Record<string, { columns: string[]; delimiter?: string }>> {
+  return Object.fromEntries((await listTables())
+    .map((t) => [t.file, { columns: Object.keys(t.columns), ...(t.delimiter ? { delimiter: t.delimiter } : {}) }]));
 }
 
 /** Two sources name the same file: equal, or the same file name (as extend.py's _same_source). */

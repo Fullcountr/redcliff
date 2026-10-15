@@ -390,7 +390,8 @@ def extend_files(con, model: Model, model_dir, paths: list) -> Extension:
     import os
     from pathlib import Path
 
-    from redcliff.propose import _model_name, candidate_references, inclusion_query, profile_query, read_profile
+    from redcliff.generate import FILE_FORMATS
+    from redcliff.propose import _model_name, candidate_references, file_relation, inclusion_query, profile_query, read_profile
 
     model_dir = Path(model_dir)
     tables: list[TableProfile] = []
@@ -399,8 +400,7 @@ def extend_files(con, model: Model, model_dir, paths: list) -> Extension:
     taken: set[str] = set()
 
     def add(path: Path, source: str) -> str:
-        literal = "'" + str(path).replace("'", "''") + "'"
-        rel = f"read_parquet({literal})" if path.suffix.lower() == ".parquet" else f"read_csv_auto({literal}, header = true)"
+        rel = file_relation(path)
         name = _fresh(_model_name(path.stem), taken)
         types = {row[0]: str(row[1]) for row in con.execute(f"DESCRIBE SELECT * FROM {rel}").fetchall()}
         tables.append(read_profile(name, source, types, con.execute(profile_query(rel, list(types))).fetchone()))
@@ -408,7 +408,7 @@ def extend_files(con, model: Model, model_dir, paths: list) -> Extension:
         return name
 
     for e in model.entities:
-        if e.source and Path(e.source).suffix.lower() in (".csv", ".parquet") and (model_dir / e.source).exists():
+        if e.source and Path(e.source).suffix.lower() in FILE_FORMATS and (model_dir / e.source).exists():
             add(model_dir / e.source, e.source)
     new = []
     for p in paths:

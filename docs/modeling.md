@@ -66,8 +66,9 @@ relationships:
   - {from: fct_sales.customer_key, to: dim_customer.customer_key}
 ```
 
-An entity's `source` is where its rows come from: a CSV or Parquet path (relative to the model) or a
-table. `append` lists more files or tables with the same columns, loaded with it (a month per file,
+An entity's `source` is where its rows come from: a data file (`.csv`, `.tsv`, `.txt`, `.parquet`,
+`.json`, `.jsonl`, `.ndjson`; relative to the model) or a table. The load reads each in its format,
+with the separator of delimited text found from its first line. `append` lists more files or tables with the same columns, loaded with it (a month per file,
 say): the load reads each and unions them.
 
 ```yaml
@@ -224,8 +225,8 @@ model a link is an entity of its own, added in the YAML.
 The playground has two modes over the same tables, switched in the top bar: **Pipeline** (steps,
 lineage, code) and **Model**. Model mode starts from a choice: **from your tables** (tick them and
 propose a Kimball or Data Vault model), **from the open pipeline** (what a legacy job joins, looks
-up and sums), **paste DDL or DBML**, or **an example**. Files you add (**Add CSV**, or dropped on the
-page) are tables both modes see: in Pipeline mode they become sources and the message offers **Model
+up and sums), **paste DDL or DBML**, or **an example**. Files you add (**Add file**, or dropped on the
+page: CSV, TSV, Parquet, JSON, or Excel, where you pick the sheets) are tables both modes see: in Pipeline mode they become sources and the message offers **Model
 it**; a CSV source's Step tab has **Model this data**.
 
 With a model, entities are cards (kind, SCD1/SCD2, grain; attributes with PK, FK, SK, BK, DK, Σ and

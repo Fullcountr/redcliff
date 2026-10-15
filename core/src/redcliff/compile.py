@@ -129,10 +129,13 @@ def _source_relation(node: Node, dialect: str, base_dir) -> str | None:
     if p["format"] == "parquet":
         return f"read_parquet({path})"
     cols = p.get("columns")
+    struct = ", ".join(f"{_literal(c)}: {_literal(_type_sql(t, 'duckdb'))}" for c, t in (cols or {}).items())
+    if p["format"] == "json":  # an array of objects, or one object per line
+        return f"read_json({path}, columns = {{{struct}}})" if cols else f"read_json_auto({path})"
+    delim = f", delim = {_literal(p['delimiter'])}" if p.get("delimiter") else ""
     if not cols:
-        return f"read_csv_auto({path}, header = true)"
-    struct = ", ".join(f"{_literal(c)}: {_literal(_type_sql(t, 'duckdb'))}" for c, t in cols.items())
-    return f"read_csv({path}, header = true, columns = {{{struct}}})"
+        return f"read_csv_auto({path}, header = true{delim})"
+    return f"read_csv({path}, header = true{delim}, columns = {{{struct}}})"
 
 
 def _node_body(node: Node, cols: dict[str, Columns], dialect: str) -> str:
@@ -198,7 +201,8 @@ def _cte_chain(pipeline: Pipeline, needed: set[str], dialect: str, base_dir) -> 
         if node.type == "source":
             relation = _source_relation(node, dialect, base_dir)
             if relation is None:
-                views.append(f"{node.id} <- {node.params['format']} {_one_line(node.params['path'])}")
+                sep = f" (sep {node.params['delimiter']!r})" if node.params.get("delimiter") else ""
+                views.append(f"{node.id} <- {node.params['format']} {_one_line(node.params['path'])}{sep}")
                 continue
             if relation == node.id:
                 continue  # the table already has the node's name
@@ -411,7 +415,7 @@ def _write_statement(target: Node, dialect: str, base_dir, blocks: list[str],
             return f"-- {target.id}: target\nCREATE OR REPLACE TABLE {_table(target)} AS\n{full}"
         if mode == "append":
             raise CompileError(f"{target.id}: DuckDB cannot append to a {fmt} file; use a table target")
-        options = "FORMAT parquet" if fmt == "parquet" else "FORMAT csv, HEADER true"
+        options = {"parquet": "FORMAT parquet", "json": "FORMAT json"}.get(fmt, "FORMAT csv, HEADER true")
         inner = "\n".join("  " + line for line in full.splitlines())
         return f"-- {target.id}: target\nCOPY (\n{inner}\n) TO {_literal(_path(target, base_dir))} ({options})"
 
@@ -503,13 +507,7 @@ def compile_pyspark(pipeline: Pipeline, base_dir=None) -> str:
             if p["format"] == "table":
                 lines.append(f"{var} = spark.table({p['table']!r})")
                 continue
-            reader = "spark.read"
-            if p["format"] == "csv":
-                reader += '.option("header", True)'
-                if p.get("columns"):
-                    ddl = ", ".join(f"{c} {_type_sql(ty, 'spark')}" for c, ty in p["columns"].items())
-                    reader += f".schema({ddl!r})"
-            lines.append(f"{var} = {reader}.{p['format']}({_path(node, base_dir)!r})")
+            lines.append(f"{var} = {spark_reader(p)}.{p['format']}({_path(node, base_dir)!r})")
         elif t in ("filter", "select", "derive", "join", "aggregate", "union"):
             lines.append(f"{var} = {_dataframe(node, ins, cols)}")
         elif t == "sql":
@@ -540,6 +538,20 @@ def compile_pyspark(pipeline: Pipeline, base_dir=None) -> str:
             for sql in p.get("post_sql") or []:
                 lines.append(f"spark.sql({_statement(sql, 'spark')!r})  # post-SQL")
     return "\n".join(lines) + "\n"
+
+
+def spark_reader(p: dict) -> str:
+    """``spark.read`` with a file source's options: a header and separator for CSV, its declared
+    columns as the schema (CSV and JSON)."""
+    reader = "spark.read"
+    if p["format"] == "csv":
+        reader += '.option("header", True)'
+        if p.get("delimiter"):
+            reader += f'.option("sep", {p["delimiter"]!r})'
+    if p["format"] in ("csv", "json") and p.get("columns"):
+        ddl = ", ".join(f"{c} {_type_sql(ty, 'spark')}" for c, ty in p["columns"].items())
+        reader += f".schema({ddl!r})"
+    return reader
 
 
 def _pyspark_merge(node: Node, df: str) -> list[str]:

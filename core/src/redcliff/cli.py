@@ -514,7 +514,7 @@ def cmd_model(args) -> int:
         from redcliff.propose import to_data_vault
 
         base = Path(args.output).parent if args.output else Path.cwd()
-        data = [f for f in args.file if f.lower().endswith((".csv", ".parquet", ".tsv"))]
+        data = [f for f in args.file if f.lower().endswith((".csv", ".tsv", ".txt", ".parquet", ".json", ".jsonl", ".ndjson"))]
         job_map = None
         if data and len(data) != len(args.file):
             _err("propose from data files (CSV, Parquet) or from one legacy job, not both")
@@ -808,10 +808,10 @@ def build_parser() -> argparse.ArgumentParser:
                                      "import (DDL, DBML), generate the pipeline that loads it, test the loaded tables")
     p.add_argument("action", choices=["validate", "export", "import", "propose", "extend", "map", "pipeline", "test"])
     p.add_argument("file", nargs="+", help="model.yaml to validate or export; a .sql or .dbml file to import; "
-                                           "CSV or Parquet files, or a legacy job (SQL, PowerCenter XML, SSIS .dtsx, "
-                                           "Talend .item, DataStage .dsx or a pipeline spec), to propose a model from; "
+                                           "data files (CSV, TSV, Parquet, JSON), or a legacy job (SQL, PowerCenter XML, "
+                                           "SSIS .dtsx, Talend .item, DataStage .dsx or a pipeline spec) to propose from; "
                                            "for map, the model then the job; for extend, the model then the "
-                                           "CSV or Parquet files to add to it")
+                                           "data files (CSV, TSV, Parquet, JSON) to add to it")
     p.add_argument("--to", choices=["ddl", "dbml", "mermaid", "dbt"], default="ddl", help="export format")
     p.add_argument("--dialect", help="SQL dialect for DDL export or import (default: duckdb)")
     p.add_argument("--name", help="model name for an import or propose; pipeline name for pipeline")

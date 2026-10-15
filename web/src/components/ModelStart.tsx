@@ -1,8 +1,9 @@
 // Model mode before there is a model: start from your tables, from the open pipeline (a legacy
 // job's joins and lookups), from DDL or DBML, or from an example.
-import { BookOpen, FileInput, FileSpreadsheet, Layers, Table2, Workflow } from "lucide-react";
+import { BookOpen, FileInput, FilePlus2, Layers, Table2, Workflow } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { DataModel, Spec } from "../model";
+import { ACCEPT } from "../files";
 import type { TableInfo } from "../modelData";
 import { ImportPanel, TablePicker } from "./ModelView";
 
@@ -78,8 +79,8 @@ export function ModelStart(props: Props) {
                 <div className="row between">
                   <div className="row">
                     <label className="btn sm ghost">
-                      <FileSpreadsheet />Add CSV
-                      <input type="file" accept=".csv" multiple hidden
+                      <FilePlus2 />Add file
+                      <input type="file" accept={ACCEPT} multiple hidden
                         onChange={(e) => { if (e.target.files?.length) props.onAddFiles(e.target.files); e.target.value = ""; }} />
                     </label>
                     <div className="segmented small" role="group" aria-label="Style">

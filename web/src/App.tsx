@@ -3,13 +3,17 @@ import {
   applyNodeChanges, useReactFlow,
 } from "@xyflow/react";
 import {
-  ArrowLeft, BookOpen, Boxes, Cable, ChevronDown, CircleCheck, FileCode2, FileSpreadsheet, Layers, Lock, Maximize, Minus,
+  ArrowLeft, BookOpen, Boxes, Cable, ChevronDown, CircleCheck, FileCode2, FilePlus2, Layers, Lock, Maximize, Minus,
   Monitor, Moon, MousePointerClick, Network, Plus, Share2, Sparkles, Sun, Upload, WandSparkles, Waypoints, Workflow,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { data } from "./engine/data";
 import { engine, engineReady, startEngine } from "./engine/engine";
 import { ImportDialog, type ImportMode, type ImportSamples } from "./components/ImportDialog";
+import { SheetDialog, type Workbook } from "./components/SheetDialog";
+import type { Added } from "./engine/data";
+import { readWorkbook, sheetCsv, type Sheet } from "./engine/excel";
+import { ACCEPT, kindOf } from "./files";
 import { Inspector, type Tab } from "./components/Inspector";
 import { ModelStart } from "./components/ModelStart";
 import { ModelView, type ModelTab } from "./components/ModelView";
@@ -77,8 +81,9 @@ export default function App() {
   const [activeItem, setActiveItem] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("step");
   const [importing, setImporting] = useState<{
-    mode: ImportMode | null; busy: boolean; error: string | null; sample?: "workflow" | "store";
+    mode: ImportMode | null; busy: boolean; error: string | null; sample?: "workflow" | "store"; file?: File;
   }>({ mode: null, busy: false, error: null });
+  const [workbooks, setWorkbooks] = useState<Workbook[] | null>(null);
   const [toast, setToast] = useState<{ text: string; action?: { label: string; run: () => void } } | null>(null);
   const [example, setExample] = useState("orders_revenue");
   // Two modes over the same tables: the pipeline canvas, and the data model.
@@ -495,29 +500,74 @@ export default function App() {
     say(`Added ${accepted.length} ${accepted.length === 1 ? "change" : "changes"} to ${model.name}`);
   };
 
+  /** Files added (Add file, or dropped): data becomes tables both modes see; a workbook asks
+   * which sheets; a legacy job opens the import; anything else says what Redcliff reads. */
   const addFiles = async (files: FileList | File[]) => {
-    const added: string[] = [];
-    let next = spec;
+    const added: Added[] = [];
+    const books: Workbook[] = [];
+    let legacy: { file: File; mode: ImportMode } | null = null;
     for (const file of Array.from(files)) {
-      if (!/\.csv$/i.test(file.name)) { say(`${file.name} isn't a CSV file`); continue; }
-      const r = await data.addCsv(file.name, await file.text());
-      added.push(r.table);
-      if (view === "pipeline" && next && !next.nodes.some((n) => n.type === "source" && n.params?.path === r.file)) {
-        const id = uniqueId(next, r.table);
-        next = { ...next, nodes: [...next.nodes, { id, type: "source", params: { format: "csv", path: r.file, columns: r.columns } }] };
+      const k = kindOf(file.name);
+      try {
+        if (k.kind === "data") {
+          const content = k.format === "parquet" ? new Uint8Array(await file.arrayBuffer()) : await file.text();
+          added.push(await data.addData(file.name, content, k.format));
+        } else if (k.kind === "workbook") {
+          const sheets = await readWorkbook(file);
+          if (sheets.length) books.push({ file: file.name, sheets }); else say(`${file.name} has no data in its sheets`);
+        } else if (k.kind === "legacy") {
+          legacy ??= { file, mode: k.mode };
+        } else {
+          say(`${file.name} ${k.why}`);
+        }
+      } catch (e) {
+        say(`Couldn't read ${file.name}: ${String((e as Error).message ?? e).split("\n")[0]}`);
       }
-      if (r.renamed) say(`${file.name} is the table ${r.table}: the name ${r.table.replace(/_\d+$/, "")} was taken`);
     }
+    if (books.length) setWorkbooks(books);
+    if (legacy) { setView("pipeline"); setImporting({ mode: legacy.mode, busy: false, error: null, file: legacy.file }); }
+    await afterAdded(added);
+  };
+
+  const addSheets = async (picked: { file: string; sheet: Sheet }[], header: boolean) => {
+    setWorkbooks(null);
+    const added: Added[] = [];
+    for (const { file, sheet } of picked) {
+      try {
+        added.push(await data.addData(file, sheetCsv(sheet, header), "table", picked.filter((p) => p.file === file).length > 1
+          ? `${file.replace(/\.[^.]+$/, "")}_${sheet.name}` : file.replace(/\.[^.]+$/, "")));
+      } catch (e) {
+        say(`Couldn't read ${sheet.name} in ${file}: ${String((e as Error).message ?? e).split("\n")[0]}`);
+      }
+    }
+    await afterAdded(added);
+  };
+
+  /** A source step for an added table: its file (with the separator), or the table for a sheet. */
+  const sourceParams = (r: Added): Record<string, unknown> =>
+    r.format === "table" ? { format: "table", table: r.table, columns: r.columns }
+      : { format: r.format, path: r.file, ...(r.delimiter ? { delimiter: r.delimiter } : {}), columns: r.columns };
+
+  const afterAdded = async (added: Added[]) => {
+    for (const r of added) if (r.renamed) say(`${r.file} is the table ${r.table}: the name ${r.table.replace(/_\d+$/, "")} was taken`);
     await refreshTables();
     if (!added.length) return;
-    const what = added.length === 1 ? added[0] : `${added.length} tables`;
+    const names = added.map((r) => r.table);
+    const what = added.length === 1 ? names[0] : `${added.length} tables`;
     if (view === "pipeline") {
+      let next = spec;
+      for (const r of added) {
+        const params = sourceParams(r);
+        if (next && !next.nodes.some((n) => n.type === "source" && (n.params?.path ?? n.params?.table) === (params.path ?? params.table))) {
+          next = { ...next, nodes: [...next.nodes, { id: uniqueId(next, r.table), type: "source", params }] };
+        }
+      }
       if (next && next !== spec) replaceSpec(next);
-      say(`Added ${what} as ${added.length === 1 ? "a source" : "sources"}`, { label: "Model it", run: () => modelTables(added) });
+      say(`Added ${what} as ${added.length === 1 ? "a source" : "sources"}`, { label: "Model it", run: () => modelTables(names) });
     } else if (dataModel && !review) {
-      void grow(added);
+      void grow(names);
     } else if (!dataModel) {
-      setStart((st) => ({ ...st, preselect: [...new Set([...st.preselect, ...added])], way: "data" }));
+      setStart((st) => ({ ...st, preselect: [...new Set([...st.preselect, ...names])], way: "data" }));
       say(`Added ${what}; tick what to model`);
     } else {
       say(`Added ${what}; add it to the model once you've finished this review`);
@@ -556,9 +606,12 @@ export default function App() {
   };
 
   /** The table a pipeline's CSV source reads, if the playground has it. */
-  const tableOf = (step: Step | null) =>
-    step?.type === "source" && step.params?.format === "csv"
-      ? tables.find((t) => sameSource(t.file, String(step.params?.path ?? "")))?.name ?? null : null;
+  const tableOf = (step: Step | null) => {
+    if (step?.type !== "source") return null;
+    const p = step.params ?? {};
+    return p.format === "table" ? tables.find((t) => t.name === p.table)?.name ?? null
+      : tables.find((t) => sameSource(t.file, String(p.path ?? "")))?.name ?? null;
+  };
 
   const share = async () => {
     const modelMode = view === "model";
@@ -603,7 +656,7 @@ export default function App() {
       {view === "pipeline" && <main
         className="canvas"
         onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}
+        onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) void addFiles(e.dataTransfer.files); }}
       >
         <ReactFlow
           nodes={nodes}
@@ -714,11 +767,12 @@ export default function App() {
               </>
             )}
           </Menu>
-          <button className="btn ghost" onClick={() => fileInput.current?.click()} disabled={!runnable} aria-label="Add CSV"
-            title={view === "pipeline" ? "Add CSV files as sources" : "Add CSV files to the model"}>
-            <FileSpreadsheet /><span className="label">Add CSV</span>
+          <button className="btn ghost" onClick={() => fileInput.current?.click()} disabled={!runnable} aria-label="Add file"
+            title={"Add data files (CSV, TSV, Parquet, JSON, Excel) " + (view === "pipeline" ? "as sources" : "to the model")
+              + ", or a legacy job to import"}>
+            <FilePlus2 /><span className="label">Add file</span>
           </button>
-          <input ref={fileInput} type="file" accept=".csv" multiple hidden
+          <input ref={fileInput} type="file" accept={ACCEPT} multiple hidden data-testid="add-file"
             onChange={(e) => { if (e.target.files?.length) void addFiles(e.target.files); e.target.value = ""; }} />
           <button className="btn ghost icon" onClick={() => setTheme(nextTheme[theme])}
             aria-label={`Theme: ${theme}`} title={`Theme: ${theme}`}>
@@ -852,6 +906,9 @@ export default function App() {
         </div>
       )}
 
+      {workbooks && <SheetDialog books={workbooks} onAdd={(picked, header) => void addSheets(picked, header)}
+        onClose={() => setWorkbooks(null)} />}
+
       {importing.mode && samples && (
         <ImportDialog
           mode={importing.mode}
@@ -862,6 +919,7 @@ export default function App() {
               : { sql: samples.legacy, powercenter: samples.powercenter, ssis: samples.ssis, talend: samples.talend, datastage: samples.datastage }) satisfies ImportSamples}
           busy={importing.busy}
           error={importing.error}
+          file={importing.file}
           onImport={doImport}
           onClose={() => setImporting({ mode: null, busy: false, error: null })}
         />

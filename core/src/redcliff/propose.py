@@ -314,6 +314,19 @@ def propose_model(tables: list[TableProfile], references: list[tuple[str, str, s
 # --------------------------------------------------------------------------- the CLI round trip
 
 
+def file_relation(path: str | Path) -> str:
+    """How DuckDB reads a data file: Parquet, JSON (an array or one object per line), else
+    delimited text with its separator sniffed (CSV, TSV, pipes)."""
+    path = Path(path)
+    literal = "'" + str(path).replace("'", "''") + "'"
+    suffix = path.suffix.lower()
+    if suffix == ".parquet":
+        return f"read_parquet({literal})"
+    if suffix in (".json", ".jsonl", ".ndjson"):
+        return f"read_json_auto({literal})"
+    return f"read_csv_auto({literal}, header = true)"
+
+
 def profile_files(con, paths: list[str | Path], base_dir: str | Path | None = None) -> ModelProposal:
     """Profile CSV/Parquet files with DuckDB, test the foreign keys their names suggest, and propose.
 
@@ -323,8 +336,7 @@ def profile_files(con, paths: list[str | Path], base_dir: str | Path | None = No
     sources: dict[str, str] = {}
     for p in paths:
         path = Path(p)
-        literal = "'" + str(path).replace("'", "''") + "'"
-        rel = f"read_parquet({literal})" if path.suffix.lower() == ".parquet" else f"read_csv_auto({literal}, header = true)"
+        rel = file_relation(path)
         name = _model_name(path.stem)
         types = {row[0]: str(row[1]) for row in con.execute(f"DESCRIBE SELECT * FROM {rel}").fetchall()}
         row = con.execute(profile_query(rel, list(types))).fetchone()

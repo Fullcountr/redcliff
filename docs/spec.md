@@ -32,7 +32,7 @@ nodes:                        # required, at least one
 
 | Type | Inputs | Params | Output columns |
 | --- | --- | --- | --- |
-| `source` | 0 | `format` (csv, parquet, table), `path` or `table`, optional `columns` (name: type) | the declared or discovered columns |
+| `source` | 0 | `format` (csv, parquet, json, table), `path` or `table`, optional `columns` (name: type); csv takes an optional `delimiter` (one character, a comma by default: `"\t"` for TSV, `"\|"` for pipes); json reads an array of objects or one object per line | the declared or discovered columns |
 | `filter` | 1 | `condition` | same as input |
 | `select` | 1 | `columns`: list of names to keep, in order | the listed columns |
 | `derive` | 1 | `columns`: name: SQL expression | input columns plus new ones; same name replaces |
@@ -40,7 +40,7 @@ nodes:                        # required, at least one
 | `aggregate` | 1 | `group_by`: list of names, `measures`: name: SQL aggregate (optional when grouping, which is `SELECT DISTINCT`) | group-by columns then measures |
 | `union` | 2+ | `distinct` (false default) | columns of the first input, matched by position |
 | `sql` | 0+ | `query`: one SELECT that reads its inputs by node id | the SELECT's columns |
-| `target` | 1 | `format`, `path` or `table`, `mode` (overwrite default, append, merge), optional `pre_sql` and `post_sql` (lists of statements); `mode: merge` takes `keys` and an optional `delete_when` | none (writes data) |
+| `target` | 1 | `format` (csv, parquet, json, table), `path` or `table`, `mode` (overwrite default, append, merge), optional `pre_sql` and `post_sql` (lists of statements); `mode: merge` takes `keys` and an optional `delete_when` | none (writes data) |
 
 The `sql` node is the escape hatch for logic without a node type yet (ORDER BY, LIMIT,
 subqueries in WHERE, QUALIFY). The SQL importer uses it so nothing is ever dropped silently.

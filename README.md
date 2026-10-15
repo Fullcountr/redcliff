@@ -141,7 +141,7 @@ no lock-in: it's your code in your repo.
 
 **Check it on real rows.** Every step shows its row count and previews its data, computed by
 DuckDB inside your browser, and runs its data quality expectations. Click a row to see exactly which source rows are behind it. Drop in
-your own CSV files to try your own data. Share the whole
+your own files to try your own data: CSV, TSV, Parquet, JSON or Excel. Share the whole
 pipeline as a link; there is no server to store it on.
 
 </td>
@@ -361,7 +361,7 @@ relationships:
 
 | You have | Redcliff gives you |
 | --- | --- |
-| CSV or Parquet files | `redcliff model propose a.csv b.csv`: keys, references and measures found by profiling, with the reason for each |
+| data files (CSV, TSV, Parquet, JSON) | `redcliff model propose a.csv b.json`: keys, references and measures found by profiling, with the reason for each |
 | more files, later | `redcliff model extend model.yaml c.csv`: only what they add (new entities, references both ways, a month's file appended to its table), each change listed; nothing you edited is touched |
 | a legacy job | `redcliff model propose job.xml`: keys and measures from what the job joins, looks up, merges and sums; `redcliff model map` shows how much of the job a model covers |
 | SQL DDL or DBML | `redcliff model import tables.sql` |

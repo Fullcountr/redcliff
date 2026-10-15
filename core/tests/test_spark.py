@@ -120,12 +120,12 @@ def register_file_sources(spark, pipeline: Pipeline, base_dir: Path) -> None:
             reader = spark.read
             if node.params["format"] == "csv":
                 reader = reader.option("header", True)
-                if node.params.get("columns"):
-                    reader = reader.schema(", ".join(f"{c} {exp.DataType.build(t).sql('spark')}"
-                                                     for c, t in node.params["columns"].items()))
-                df = reader.csv(path)
-            else:
-                df = reader.parquet(path)
+                if node.params.get("delimiter"):
+                    reader = reader.option("sep", node.params["delimiter"])
+            if node.params["format"] in ("csv", "json") and node.params.get("columns"):
+                reader = reader.schema(", ".join(f"{c} {exp.DataType.build(t).sql('spark')}"
+                                                 for c, t in node.params["columns"].items()))
+            df = getattr(reader, node.params["format"])(path)
             df.createOrReplaceTempView(node.id)
 
 
@@ -245,6 +245,57 @@ def test_pyspark_script_writes_every_target(spark, duck, workdir, name):
         else:
             continue  # CSV targets are covered by the Spark SQL script test
         assert rows(written.collect()) == duck_rows(duck, pipeline, target.inputs[0], workdir), f"{name}: {target.id}"
+
+
+# ---------------------------------------------------------------- file formats
+
+FORMATS_SPEC = """
+version: 0
+name: file_formats
+nodes:
+  - id: items
+    type: source
+    params:
+      format: json
+      path: items.jsonl
+      columns: {item_id: int, order_id: int, sku: varchar, quantity: int}
+  - id: skus
+    type: source
+    params: {format: csv, path: skus.txt, delimiter: "|", columns: {sku: varchar, label: varchar, price: "decimal(8,2)"}}
+  - id: priced
+    type: join
+    inputs: [items, skus]
+    params: {how: inner, condition: items.sku = skus.sku}
+  - id: by_order
+    type: aggregate
+    inputs: [priced]
+    params: {group_by: [order_id], measures: {lines: COUNT(*), revenue: SUM(quantity * price)}}
+  - id: out_json
+    type: target
+    inputs: [by_order]
+    params: {format: json, path: out/by_order_json}
+  - id: out_table
+    type: target
+    inputs: [by_order]
+    params: {format: table, table: by_order_formats}
+"""
+
+
+def test_json_and_delimited_sources_agree_on_spark_and_duckdb(spark, duck, tmp_path):
+    (tmp_path / "items.jsonl").write_text(
+        '{"item_id": 1, "order_id": 1, "sku": "A", "quantity": 2}\n{"item_id": 2, "order_id": 1, "sku": "B", "quantity": 1}\n'
+        '{"item_id": 3, "order_id": 2, "sku": "A", "quantity": 5}\n')
+    (tmp_path / "skus.txt").write_text("sku|label|price\nA|Lamp|3.50\nB|Mug, large|7.25\n")
+    pipeline = Pipeline.from_dict(yaml.safe_load(FORMATS_SPEC))
+    want = duck_rows(duck, pipeline, "by_order", tmp_path)
+    assert want == [(1.0, 2.0, 14.25), (2.0, 1.0, 17.5)]
+    register_file_sources(spark, pipeline, tmp_path)
+    assert rows(spark.sql(compile_query(pipeline, "by_order", "spark", tmp_path)).collect()) == want
+    spark.sql("DROP TABLE IF EXISTS by_order_formats")
+    exec(compile(compile_pyspark(pipeline, tmp_path), "<file_formats.py>", "exec"), {"__name__": "pipeline"})
+    assert rows(spark.table("by_order_formats").collect()) == want
+    written = spark.read.json(str(tmp_path / "out" / "by_order_json")).select("order_id", "lines", "revenue")
+    assert rows(written.collect()) == want
 
 
 # ---------------------------------------------------------------- Informatica expressions on Spark

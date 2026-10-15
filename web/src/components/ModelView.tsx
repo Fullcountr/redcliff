@@ -8,7 +8,7 @@ import {
 } from "@xyflow/react";
 import * as yaml from "js-yaml";
 import {
-  Check, CircleAlert, CircleCheck, CircleDot, Copy, Download, FileCode2, FileSpreadsheet, Layers, Link2, Maximize, Minus,
+  Check, CircleAlert, CircleCheck, CircleDot, Copy, Download, FileCode2, FilePlus2, Layers, Link2, Maximize, Minus,
   Orbit, Plus, Rows3, ScrollText, Sigma, Table2, Workflow, type LucideIcon,
 } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
@@ -16,6 +16,7 @@ import { engine } from "../engine/engine";
 import type {
   DataModel, EntityKind, JobMap, ModelAnalysis, ModelChange, ModelEntity, ModelExport, ModelExtension, Spec,
 } from "../model";
+import { ACCEPT } from "../files";
 import { checkLink, csvHeaders, tablesInModel, type LinkCheck, type TableInfo } from "../modelData";
 import { fitPadding } from "../layout";
 import { highlight } from "../ui";
@@ -419,13 +420,13 @@ function GrowSection({ model, tables, onGrow, onAddFiles, onNewModel, dataReady,
       <p className="quiet">Add tables and Redcliff proposes only what they add: new entities, and references to and
         from the ones you have. Nothing you changed is touched. You can also drag from an attribute to a dimension's key
         to link them.</p>
-      {rest.length === 0 ? <p className="quiet">Every table here is in the model. Add a CSV to grow it.</p> : (
+      {rest.length === 0 ? <p className="quiet">Every table here is in the model. Add a file to grow it.</p> : (
         <TablePicker tables={rest} picked={picked} onPick={setPicked} />
       )}
       <div className="row between">
         <label className={`btn sm ghost${dataReady ? "" : " is-disabled"}`}>
-          <FileSpreadsheet />Add CSV
-          <input type="file" accept=".csv" multiple hidden disabled={!dataReady}
+          <FilePlus2 />Add file
+          <input type="file" accept={ACCEPT} multiple hidden disabled={!dataReady}
             onChange={(e) => { if (e.target.files?.length) onAddFiles(e.target.files); e.target.value = ""; }} />
         </label>
         <button className="btn sm primary" disabled={!picked.size || !dataReady || !engineReady}

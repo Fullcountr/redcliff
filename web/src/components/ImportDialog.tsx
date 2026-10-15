@@ -19,9 +19,11 @@ type Props = {
   error: string | null;
   onImport: (mode: ImportMode, text: string, dialect: string, params: string) => void;
   onClose: () => void;
+  /** A legacy job file added with Add file: read it in, as if picked here. */
+  file?: File | null;
 };
 
-export function ImportDialog({ mode: initialMode, samples, busy, error, onImport, onClose }: Props) {
+export function ImportDialog({ mode: initialMode, samples, busy, error, onImport, onClose, file: given }: Props) {
   const [mode, setMode] = useState<ImportMode>(initialMode);
   const [sql, setSql] = useState(samples.sql);
   const [xml, setXml] = useState(samples.powercenter);
@@ -53,6 +55,7 @@ export function ImportDialog({ mode: initialMode, samples, busy, error, onImport
     else if (isXml) { setMode("powercenter"); setXml(content); }
     else { setMode("sql"); setSql(content); }
   };
+  useEffect(() => { if (given) void readFile(given); }, [given]);
 
   return (
     <dialog ref={ref} className="dialog" onClose={onClose} aria-labelledby="import-title">

@@ -474,7 +474,7 @@ class Server:
             return pipeline if pipeline is not None else result.pipeline
 
         @tool("propose_model", "Propose a data model", "Propose a Kimball or Data Vault 2.0 model, with the reason for "
-              "every choice, as a proposal for a model file (apply it with apply_edit). Either profile CSV or Parquet "
+              "every choice, as a proposal for a model file (apply it with apply_edit). Either profile CSV, Parquet or JSON "
               "files in the workspace (keys, nulls, references between them), or read a legacy job (a pipeline spec, "
               "SQL script, PowerCenter XML or SSIS .dtsx): the columns it joins and looks up on become keys, the ones "
               "it sums become measures, and the result says how much of what the job writes the model covers.",
@@ -514,7 +514,7 @@ class Server:
                 result["coverage"] = map_job(pipeline, proposal.model, target.parent, self.path(job).parent).to_markdown()
             return result
 
-        @tool("extend_model", "Add files to a model", "Grow an existing data model with new CSV or Parquet files "
+        @tool("extend_model", "Add files to a model", "Grow an existing data model with new CSV, Parquet or JSON files "
               "without touching what it has: new entities for new tables, references the data shows (new to existing "
               "and existing to new, with the lookup attributes they bring), and files with exactly the columns of one "
               "the model loads appended to it. Returns a proposal for the model file (apply it with apply_edit) and "

@@ -13,7 +13,7 @@ Redcliff is an Apache 2.0 visual data pipeline designer. Tagline: "Legacy ETL in
 
 ## Spec v0
 
-Node types: source (csv, parquet, table), filter, select, derive, join, aggregate, union, target.
+Node types: source (csv, parquet, json, table), filter, select, derive, join, aggregate, union, target.
 Each node has: id, type, inputs (node ids), params. Expressions are SQL strings.
 
 ## Compiler and lineage

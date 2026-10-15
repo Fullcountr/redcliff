@@ -42,12 +42,15 @@ def _wrap(fn):
 
 
 def _browser_paths(pipeline: Pipeline) -> Pipeline:
-    """File sources read the file by its base name, which is how the browser registers files."""
+    """File sources read the file by its base name, which is how the browser registers files; JSON
+    and Parquet files are registered as CSV (DuckDB-Wasm's readers for them are downloaded extensions)."""
     data = pipeline.to_dict()
     for node in data["nodes"]:
         params = node.get("params", {})
         if node["type"] in ("source", "target") and "path" in params:
             params["path"] = PurePosixPath(params["path"]).name
+        if node["type"] == "source" and params.get("format") in ("json", "parquet"):
+            params["format"] = "csv"  # the browser reads them in JavaScript and registers them as CSV
     return Pipeline.from_dict(data)
 
 
@@ -371,30 +374,23 @@ def model_map(model: Any, spec: Any) -> dict[str, Any]:
 @_wrap
 def model_load_pipeline(model: Any, headers: Any = None) -> dict[str, Any]:
     """The pipeline that loads a model (Kimball: SCD2 dimensions and point-in-time facts; Data Vault:
-    hubs, links, satellites and current-state marts). ``headers`` maps the browser's CSV files to
-    their column names, so the load's sources declare them (and lineage runs through) as the CLI's do."""
-    import tempfile
+    hubs, links, satellites and current-state marts). ``headers`` describes the browser's files by
+    name: their column names, or ``{"columns": [...], "delimiter": ...}``, so the load's sources
+    declare them (and lineage runs through) as the CLI's do."""
     from pathlib import Path
 
     from redcliff.generate import model_pipeline
 
     headers = json.loads(headers) if isinstance(headers, str) else (headers or {})
     m = _model(model)
-    # The browser has each CSV under its file name: read a model's data/orders.csv as orders.csv.
+    # The browser has each file under its name: read a model's data/orders.csv as orders.csv.
     by_name = {Path(f).name: f for f in headers}
     here = lambda src: src if src in headers or Path(src).name not in by_name else by_name[Path(src).name]  # noqa: E731
     for e in m.entities:
         if e.source:
             e.source = here(e.source)
         e.append = [here(a) for a in e.append or []]
-    with tempfile.TemporaryDirectory() as tmp:
-        for name, columns in headers.items():
-            path = Path(tmp, name)
-            if ".." in Path(name).parts or Path(name).is_absolute():
-                continue
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(",".join(columns) + "\n", encoding="utf-8")
-        pipeline = model_pipeline(m, tmp)
+    pipeline = model_pipeline(m, files=headers)
     return {"spec": pipeline.to_dict(), "targets": [n.id for n in pipeline.nodes if n.type == "target"]}
 
 

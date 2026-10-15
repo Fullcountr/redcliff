@@ -1090,3 +1090,11 @@ label.btn.is-disabled { opacity: 0.5; pointer-events: none; }
   .model-start { place-items: start center; padding-bottom: 20px; }
   .link-card { left: 50%; }
 }
+
+/* adding sheets from a workbook */
+.sheet-dialog { width: min(620px, calc(100vw - 32px)); }
+.sheet-book h3 { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; margin: 0 0 6px; }
+.sheet-book h3 svg { width: 14px; height: 14px; color: var(--t-source); }
+.sheet-book + .sheet-book { margin-top: 14px; }
+.sheet-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 11px; }
+.check-line { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 12.5px; cursor: pointer; }

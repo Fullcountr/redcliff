@@ -31,7 +31,7 @@ TABLE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*(\.[A-Za-z_][A-Za-z0-9_$]*)
 VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 NODE_TYPES = ("source", "filter", "select", "derive", "join", "aggregate", "union", "sql", "target")
-FORMATS = ("csv", "parquet", "table")
+FORMATS = ("csv", "parquet", "json", "table")
 JOIN_TYPES = ("inner", "left", "right", "full")
 WRITE_MODES = ("overwrite", "append", "merge", "scd1", "scd2", "insert_new", "insert_changed")
 KEYED_MODES = ("merge", "scd1", "scd2", "insert_new", "insert_changed")
@@ -217,6 +217,10 @@ def _check_io(issues: list[Issue], nid: str, params: dict, writing: bool) -> Non
         issues.append(Issue(nid, f"'format' must be one of {list(FORMATS)}"))
         return
     key = "table" if fmt == "table" else "path"
+    delimiter = params.get("delimiter")
+    if delimiter is not None and (fmt != "csv" or not isinstance(delimiter, str) or len(delimiter) != 1
+                                  or delimiter in "\r\n\"'"):
+        issues.append(Issue(nid, "'delimiter' is one character, for csv (a tab is \"\\t\")"))
     if not isinstance(params.get(key), str) or not params[key].strip():
         issues.append(Issue(nid, f"format '{fmt}' needs a '{key}'"))
     elif key == "table" and not TABLE_PATTERN.match(params[key]):

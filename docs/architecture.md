@@ -24,6 +24,14 @@ PowerCenter importer    -->                        -->  Preview  -> DuckDB-Wasm 
 DuckDB-Wasm and Pyodide get one thread each and about 4 GB of memory. Redcliff previews on
 samples; full runs happen in the user's own Spark or DuckDB environment with the generated code.
 
+Files added in the playground stay in the browser. Delimited text (CSV, TSV, pipes; the separator
+is sniffed) goes straight to DuckDB. JSON and Parquet are read in JavaScript (Parquet with
+[hyparquet](https://github.com/hyparam/hyparquet)) and handed to DuckDB as CSV, because DuckDB-Wasm
+would download its readers for them from extensions.duckdb.org, which work networks often block;
+nested values become JSON text in previews, and the generated code reads the real format. An Excel
+workbook ([read-excel-file](https://gitlab.com/catamphetamine/read-excel-file)) asks which sheets to
+add; each becomes a table, read as a table by pipelines and models.
+
 ## Compiler output
 
 | Target | What you get | Notes |
