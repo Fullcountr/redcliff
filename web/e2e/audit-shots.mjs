@@ -47,9 +47,8 @@ for (const theme of ["light", "dark"]) {
   await page.waitForSelector("dialog[open]", { state: "detached" });
   await page.waitForTimeout(1500);
   await snap(page, `${theme}-06-talend`);
-  await page.locator(".topbar").getByRole("button", { name: "Import" }).click();
-  await page.getByRole("menuitem", { name: /Data model/ }).click();
-  await snap(page, `${theme}-07-model-import-tab`);
+  await page.locator(".topbar").getByRole("tab", { name: "Model" }).click();
+  await snap(page, `${theme}-07-model-start`);
   await page.getByRole("button", { name: /Propose a model from/ }).click();
   await page.waitForTimeout(1500);
   await snap(page, `${theme}-08-model-proposed`);
@@ -60,6 +59,10 @@ for (const theme of ["light", "dark"]) {
     await page.waitForTimeout(800);
     await snap(page, `${theme}-10-model-${tab.toLowerCase()}`);
   }
+  await page.locator(".topbar input[type=file]").setInputFiles([{ name: "statuses.csv", mimeType: "text/csv",
+    buffer: Buffer.from("status,description\nshipped,Out\npending,Waiting\ncancelled,Cancelled\n") }]);
+  await page.waitForSelector('[data-testid="model-review"]', { timeout: 30000 });
+  await snap(page, `${theme}-11-model-review`);
   await page.context().close();
 }
 const phone = await open("light", { width: 390, height: 844 });

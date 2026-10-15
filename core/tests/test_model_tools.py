@@ -98,6 +98,20 @@ def test_mcp_model_tools(tmp_path):
     call("apply_edit", proposal_id=load["proposal_id"])
     assert "path: ../data/customers.csv" in (tmp_path / "pipelines" / "load_sales.yaml").read_text()
 
+    # Growing it with a new file: the new dimension, and orders' status looked up in it.
+    (tmp_path / "data" / "statuses.csv").write_text("status,description\nshipped,Out\npending,Waiting\n"
+                                                    "cancelled,Cancelled\nreturned,Back\n")
+    grown = call("extend_model", model="models/sales.yaml", files=["data/statuses.csv"])
+    assert {c["id"] for c in grown["changes"]} == {"entity:dim_status", "relationship:fct_orders.status_key"}
+    assert grown["can_apply"] and "dim_status" in grown["report"]
+    skipped = call("extend_model", model="models/sales.yaml", files=["data/statuses.csv"],
+                   skip=["relationship:fct_orders.status_key"])
+    assert [c["accepted"] for c in skipped["changes"]] == [True, False]
+    call("apply_edit", proposal_id=grown["proposal_id"])
+    model = parse_model((tmp_path / "models" / "sales.yaml").read_text())
+    assert model.entity("dim_status").source == "../data/statuses.csv"
+    assert tools["extend_model"]["annotations"]["readOnlyHint"]
+
     vault = call("propose_model", files=["data/orders.csv", "data/customers.csv"], out="models/vault.yaml", style="data_vault")
     assert "hub_customer" in vault["report"]
 

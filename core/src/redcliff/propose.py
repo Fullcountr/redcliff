@@ -111,7 +111,7 @@ def read_profile(name: str, source: str, types: dict[str, str], row: list[Any] |
 def _singular(name: str) -> str:
     if name.endswith("ies") and len(name) > 4:
         return name[:-3] + "y"
-    if name.endswith(("sses", "xes", "ches", "shes")):
+    if name.endswith(("sses", "xes", "ches", "shes", "uses")):
         return name[:-2]
     if name.endswith("s") and not name.endswith("ss") and len(name) > 2:
         return name[:-1]
@@ -250,7 +250,10 @@ def propose_model(tables: list[TableProfile], references: list[tuple[str, str, s
         keys = t.candidate_keys()
         prefix = "fct_" if kind == "fact" else ""
         e = Entity(id=f"{prefix}{_model_name(t.name)}", kind=kind, source=source)
-        fks = {c: (p, k) for c, p, k in refs_from.get(t.name, [])}
+        fks: dict[str, tuple[str, str]] = {}
+        for c, p, k in refs_from.get(t.name, []):  # a column that fits several parents: the dimension's
+            if c not in fks or (kinds.get(fks[c][0]) != "dimension" and kinds.get(p) == "dimension"):
+                fks[c] = (p, k)
         ms = {c.name for c in measures(t, set(fks))}
         if kind == "fact":
             e.grain = f"one {_singular(t.name)} ({keys[0]})" if keys else f"one row of {t.name}"

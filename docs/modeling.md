@@ -66,6 +66,17 @@ relationships:
   - {from: fct_sales.customer_key, to: dim_customer.customer_key}
 ```
 
+An entity's `source` is where its rows come from: a CSV or Parquet path (relative to the model) or a
+table. `append` lists more files or tables with the same columns, loaded with it (a month per file,
+say): the load reads each and unions them.
+
+```yaml
+  - id: fct_orders
+    kind: fact
+    source: data/orders.csv
+    append: [data/orders_october.csv, data/orders_november.csv]
+```
+
 Rules: entity ids and attribute names match `^[a-z_][a-z0-9_]*$`; types parse as SQL types; a fact
 declares its grain; a relationship joins two existing attributes of compatible types, and its
 target is the entity's key (a surrogate key, or its single business key); `history` and `track`
@@ -81,6 +92,7 @@ apply to dimension attributes.
 | `redcliff model import tables.sql [--dialect postgres]` | a model from `CREATE TABLE` statements: columns, primary and foreign keys |
 | `redcliff model propose a.csv b.csv -o model.yaml [--style data_vault]` | profile files and propose a Kimball (or Data Vault) model, with the reason for each choice |
 | `redcliff model propose job.sql\|mapping.xml\|package.dtsx\|pipeline.yaml -o model.yaml` | propose a model from what a legacy job does ([below](#from-a-legacy-job)) |
+| `redcliff model extend model.yaml c.csv d.csv -o model.yaml [--skip ID] [--take ID]` | add files to a model: only what they add, each change listed with why ([below](#growing-a-model)) |
 | `redcliff model map model.yaml job.xml [-o map.md\|map.json]` | for every column the job writes, the model attributes behind it |
 | `redcliff model pipeline model.yaml -o load.yaml` | the pipeline that loads the model |
 | `redcliff model test model.yaml --db w.duckdb` | check the loaded tables |
@@ -178,13 +190,50 @@ and [`sales_vault.yaml`](../examples/models/sales_vault.yaml) → [`load_sales_v
   propose a model with reasons), `map_job` and `generate_load`; proposals go through `apply_edit`,
   like any edit.
 
+## Growing a model
+
+Data rarely arrives at once. `redcliff model extend model.yaml statuses.csv orders_october.csv`
+(and adding files in the playground) proposes only what the new files add, and keeps every entity,
+attribute and relationship the model has, renames and edits included:
+
+- **entity**: a new entity for a new table: a dimension, a fact, or `dim_date` if new facts have
+  dates and the model has no date dimension;
+- **relationship**: a reference the data shows, tested both ways: a new fact's `customer_id` found
+  in the dimension you have (its lookup takes the existing key's name, even after a rename), or an
+  existing fact's `status` found in a new `statuses` table. The lookup attribute and the durable
+  key come with the relationship, so skipping it leaves the column as it was;
+- **append**: a new file with exactly the columns, in order, of one the model loads (or of another
+  new file) reads as more rows of the same table, and goes into that entity's `append` list. Its
+  alternative, a separate entity, is offered too, off by default.
+
+Each change has an id (`entity:dim_status`, `relationship:fct_orders.status_key`,
+`append:orders_october`) and a reason; the CLI prints them, `--skip ID` leaves one out and `--take
+ID` takes one that is off (and drops its alternative). A change that needs a skipped entity goes
+with it. Files the model already loads, and references between tables it already has, are left
+alone: the model already says what it wants there.
+
+A relationship can also be drawn by hand: in the playground, drag from an attribute of a fact to a
+dimension's key. Redcliff first counts how many of the attribute's values the dimension has ("2 of
+3 values found; 1 without a match gets the unknown member"), then adds the lookup (an attribute named
+after the surrogate key, read from that column, which becomes the durable key). Facts link to
+dimensions; Redcliff doesn't load dimension-to-dimension references (outriggers), and in a Data Vault
+model a link is an entity of its own, added in the YAML.
+
 ## In the playground
 
-**Examples → Data models → sales** opens the model view: entities as cards (kind, SCD1/SCD2, grain;
-attributes with PK, FK, SK, BK, Σ and SCD1 marks) and relationships drawn key to key. Click an entity
-for its attributes. The panel checks the model, exports DDL (in eight dialects), DBML, Mermaid and dbt,
-edits the YAML, and imports DDL or DBML (**Import → Data model**). **Import → Data model → From
-your data** profiles the loaded tables and proposes a model; the **Load** tab generates its pipeline
-and opens it on the canvas. **Pipelines** goes back to the canvas. After importing a legacy job,
-its **Migration** tab has **Model it**: a Kimball or Data Vault model proposed from the job, with the
-step behind each reason and the job's coverage, column by column, under the model's checks.
+The playground has two modes over the same tables, switched in the top bar: **Pipeline** (steps,
+lineage, code) and **Model**. Model mode starts from a choice: **from your tables** (tick them and
+propose a Kimball or Data Vault model), **from the open pipeline** (what a legacy job joins, looks
+up and sums), **paste DDL or DBML**, or **an example**. Files you add (**Add CSV**, or dropped on the
+page) are tables both modes see: in Pipeline mode they become sources and the message offers **Model
+it**; a CSV source's Step tab has **Model this data**.
+
+With a model, entities are cards (kind, SCD1/SCD2, grain; attributes with PK, FK, SK, BK, DK, Σ and
+SCD1 marks) and relationships are drawn key to key. Click an entity for its attributes, where it loads
+from, and why each is what it is. **Grow the model** adds tables: what they add comes back as a list
+to tick, drawn on the canvas with the new parts marked, until you add it. The **Load** tab generates
+the pipeline that loads the model and opens it in Pipeline mode, where **Loads ‹model›** goes back;
+**Export** writes DDL (eight dialects), DBML, Mermaid and dbt; **YAML** edits it; **Share** puts the
+model in a link (the data stays with you). After importing a legacy job, its **Migration** tab has
+**Model it**: a model proposed from the job, with the step behind each reason and the job's coverage,
+column by column.

@@ -160,6 +160,7 @@ export type ModelAttribute = {
   history?: "scd1" | "scd2";
   track?: boolean;
   description?: string;
+  source?: string;
 };
 export type ModelEntity = {
   id: string;
@@ -167,6 +168,8 @@ export type ModelEntity = {
   description?: string;
   grain?: string;
   history?: "scd1" | "scd2";
+  source?: string;
+  append?: string[];
   attributes: ModelAttribute[];
 };
 export type DataModel = {
@@ -185,6 +188,22 @@ export type ModelAnalysis = {
   scd2: string[];
 };
 export type ModelExport = "ddl" | "dbml" | "mermaid" | "dbt";
+/** One thing new tables add to a model (core/src/redcliff/extend.py), for a person to accept or skip. */
+export type ModelChange = {
+  id: string;
+  kind: "entity" | "relationship" | "append";
+  label: string;
+  why: string[];
+  default: boolean;
+  needs: string[];
+  excludes: string[];
+  entity?: ModelEntity;
+  reasons?: Record<string, string[]>;
+  target?: string;
+  relationship?: { from: string; to: string };
+  path?: string;
+};
+export type ModelExtension = { changes: ModelChange[]; notes: string[] };
 /** A legacy job mapped onto a model: for every column it writes, the model attributes behind it. */
 export type JobMap = {
   coverage: number;

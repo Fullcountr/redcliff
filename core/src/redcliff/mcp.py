@@ -514,6 +514,39 @@ class Server:
                 result["coverage"] = map_job(pipeline, proposal.model, target.parent, self.path(job).parent).to_markdown()
             return result
 
+        @tool("extend_model", "Add files to a model", "Grow an existing data model with new CSV or Parquet files "
+              "without touching what it has: new entities for new tables, references the data shows (new to existing "
+              "and existing to new, with the lookup attributes they bring), and files with exactly the columns of one "
+              "the model loads appended to it. Returns a proposal for the model file (apply it with apply_edit) and "
+              "every change with its id; leave changes out with skip, include ones that are off by default with take.",
+              {"model": {**S, "description": "Model path, relative to the root"},
+               "files": {"type": "array", "items": S, "description": "Data files to add, relative to the root"},
+               "skip": {"type": "array", "items": S, "description": "Change ids to leave out"},
+               "take": {"type": "array", "items": S, "description": "Change ids that are off by default to include"}},
+              ["model", "files"])
+        def extend_model(model, files, skip=None, take=None):
+            from redcliff.diff import diff_models
+            from redcliff.extend import apply_changes, extend_files
+            from redcliff.model import dump_model, load_model
+
+            target = self.path(model)
+            base = load_model(target)
+            ext = extend_files(self.duck(), base, target.parent, [self.path(f) for f in files])
+            known = {c.id for c in ext.changes}
+            unknown = (set(skip or []) | set(take or [])) - known
+            if unknown:
+                raise ToolError(f"no such change: {', '.join(sorted(unknown))}; the changes are {sorted(known)}")
+            dropped = set(skip or []) | {x for c in ext.changes if c.id in set(take or []) for x in c.excludes}
+            accepted = [c.id for c in ext.changes if (c.default or c.id in set(take or [])) and c.id not in dropped]
+            grown = apply_changes(base, ext.changes, accepted)
+            diff = diff_models(base, grown)
+            result = _propose_text(model, dump_model(grown), True, diff.to_markdown(f"`{model}` extended", 3),
+                                   diff.summary(), diff.issues)
+            result["changes"] = [{"id": c.id, "label": c.label, "why": c.why, "accepted": c.id in accepted}
+                                 for c in ext.changes]
+            result["notes"] = ext.notes
+            return result
+
         @tool("map_job", "Map a job onto a model", "For every column a legacy job (or pipeline spec) writes, the model "
               "attributes its source columns land in, and the columns the model is missing: how much of the job a model "
               "covers.",

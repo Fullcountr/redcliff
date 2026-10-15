@@ -69,11 +69,13 @@ class Entity:
     grain: str | None = None  # facts: what one row is
     history: str | None = None  # dimensions: scd2 (default) or scd1
     source: str | None = None  # where its rows come from: a file path (relative to the model) or a table
+    append: list[str] = field(default_factory=list)  # more files or tables with the same columns, loaded too
 
     @classmethod
     def from_dict(cls, d: dict) -> Entity:
         return cls(id=d.get("id"), kind=d.get("kind", "table"), description=d.get("description"),
                    grain=d.get("grain"), history=d.get("history"), source=d.get("source"),
+                   append=list(d.get("append") or []) if isinstance(d.get("append"), list) else d.get("append"),
                    attributes=[Attribute.from_dict(a) for a in d.get("attributes") or [] if isinstance(a, dict)])
 
     def to_dict(self) -> dict:
@@ -81,6 +83,8 @@ class Entity:
         for key in ("description", "grain", "history", "source"):
             if getattr(self, key):
                 out[key] = getattr(self, key)
+        if self.append:
+            out["append"] = list(self.append)
         out["attributes"] = [a.to_dict() for a in self.attributes]
         return out
 
@@ -244,6 +248,9 @@ def validate_model(model: Model) -> list[Issue]:
             issues.append(Issue(e.id, "an entity needs at least one attribute"))
         if e.kind == "fact" and not (isinstance(e.grain, str) and e.grain.strip()):
             issues.append(Issue(e.id, "a fact needs a 'grain': what one row is"))
+        if e.append and (not isinstance(e.append, list) or not e.source
+                         or not all(isinstance(p, str) and p.strip() for p in e.append)):
+            issues.append(Issue(e.id, "'append' is a list of files or tables, next to a 'source'"))
         if e.history is not None and (e.kind != "dimension" or e.history not in HISTORY):
             issues.append(Issue(e.id, f"'history' applies to dimensions and is one of {list(HISTORY)}"))
         names: set[str] = set()

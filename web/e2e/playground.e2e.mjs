@@ -244,7 +244,7 @@ await step("a PowerCenter mapping becomes a proposed model, with what it covers"
   await shot(page, "12b-model-from-job");
   await page.locator('[data-testid="entity-dim_region"]').click();
   assert.match(await page.locator('[data-testid="model-why"]').textContent(), /looks regions rows up by region \(step lkp_region_unique\)/);
-  await page.locator(".topbar").getByRole("button", { name: "Pipelines" }).click();
+  await page.locator(".topbar").getByRole("tab", { name: "Pipeline" }).click();
   await page.waitForSelector('.react-flow__node[data-id="agg_region_month"]');
 });
 
@@ -363,17 +363,21 @@ await step("a data model shows as a diagram, exports DDL and Mermaid, and import
   await page.getByRole("button", { name: "Mermaid", exact: true }).click();
   await page.waitForFunction(() => (document.querySelector('[data-testid="model-export"]')?.textContent ?? "").startsWith("erDiagram"));
   await shot(page, "16-model");
-  await page.getByRole("tab", { name: "Import" }).click();
-  await page.locator(".panel").getByRole("button", { name: "Import", exact: true }).click();
+  await page.locator(".topbar").getByRole("button", { name: "Import" }).click();
+  await page.getByRole("menuitem", { name: /Data model/ }).click();
+  await page.waitForSelector('[data-testid="model-start"]');
+  await page.locator(".start-body").getByRole("button", { name: "Import", exact: true }).click();
   await page.waitForSelector('[data-testid="entity-fct_sales"]');
   await page.waitForSelector('[data-testid="entity-dim_product"]');
-  await page.locator(".topbar").getByRole("button", { name: "Pipelines" }).click();
+  await page.locator(".topbar").getByRole("tab", { name: "Pipeline" }).click();
   await page.waitForSelector(".react-flow__node .step");
 });
 
 await step("a model proposed from the sample data opens its load as a pipeline", async () => {
-  await page.locator(".topbar").getByRole("button", { name: "Import" }).click();
-  await page.getByRole("menuitem", { name: /Data model/ }).click();
+  await page.locator(".topbar").getByRole("tab", { name: "Model" }).click();
+  await page.getByRole("button", { name: "New model" }).click();
+  await page.waitForSelector('[data-testid="model-start"]');
+  await shot(page, "17a-model-start");
   await page.getByRole("button", { name: /Propose a model from 2 tables/ }).click();
   for (const id of ["dim_customer", "dim_date", "fct_orders"]) await page.waitForSelector(`[data-testid="entity-${id}"]`);
   await page.locator('[data-testid="entity-dim_customer"]').click();
@@ -384,6 +388,82 @@ await step("a model proposed from the sample data opens its load as a pipeline",
   await page.getByRole("button", { name: "Open as a pipeline" }).click();
   await page.waitForSelector('.react-flow__node[data-id="keyed_fct_orders"]');
   await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="stg_dim_customer"] .step-rows')?.textContent === "5 rows", null, { timeout: 30000 });
+  await page.waitForFunction(() => /No issues/.test(document.querySelector(".statusbar")?.textContent ?? ""), null, { timeout: 15000 });
+  await page.locator('[data-testid="loads-model"]').click();
+  await page.waitForSelector('[data-testid="entity-fct_orders"]');
+});
+
+const csv = (name, text) => ({ name, mimeType: "text/csv", buffer: Buffer.from(text) });
+const drag = async (from, to) => {
+  const a = await page.locator(from).boundingBox();
+  const b = await page.locator(to).boundingBox();
+  await page.mouse.move(a.x + 4, a.y + 4);
+  await page.mouse.down();
+  await page.mouse.move((a.x + b.x) / 2, (a.y + b.y) / 2, { steps: 8 });
+  await page.mouse.move(b.x + 4, b.y + 4, { steps: 8 });
+  await page.mouse.up();
+};
+
+await step("adding CSVs grows the model: new entities, references both ways, a month appended", async () => {
+  await page.locator(".topbar input[type=file]").setInputFiles([
+    csv("statuses.csv", "status,description\nshipped,Left the warehouse\npending,Waiting for payment\ncancelled,Cancelled\n"),
+    csv("orders_october.csv", "order_id,customer_id,order_date,status,amount\n20,101,2026-10-01,shipped,40.00\n21,103,2026-10-02,cancelled,50.00\n"),
+  ]);
+  await page.waitForSelector('[data-testid="model-review"]', { timeout: 30000 });
+  const ids = await page.locator('[data-testid^="change-"]').evaluateAll((els) => els.map((e) => e.dataset.testid));
+  assert.deepEqual(ids, ["change-append:orders_october", "change-entity:dim_status", "change-entity:fct_orders_october",
+    "change-relationship:fct_orders.status_key"]);
+  assert.ok(!(await page.locator('[data-testid="change-entity:fct_orders_october"] input').isChecked()));
+  await page.waitForSelector('[data-testid="entity-dim_status"] .new-badge');
+  await shot(page, "17b-model-review");
+  await page.locator('[data-testid="review-accept"]').click();
+  await page.waitForSelector('[data-testid="model-review"]', { state: "detached" });
+  await page.waitForSelector('[data-testid="entity-dim_status"]');
+  assert.equal(await page.locator('[data-testid="entity-dim_status"] .new-badge').count(), 0);
+  await page.locator('[data-testid="entity-fct_orders"]').click();
+  assert.match(await page.locator('[data-testid="entity-source"]').textContent(), /orders\.csv \+ orders_october\.csv/);
+  await page.getByRole("tab", { name: "Load" }).click();
+  await page.getByRole("button", { name: "Open as a pipeline" }).click();
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="src_fct_orders"] .step-rows')?.textContent === "10 rows",
+    null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelector('.react-flow__node[data-id="stg_dim_status"] .step-rows')?.textContent === "3 rows",
+    null, { timeout: 30000 });
+  await page.locator('[data-testid="loads-model"]').click();
+  await page.waitForSelector('[data-testid="entity-dim_status"]');
+});
+
+await step("a relationship drawn by dragging is checked against the data", async () => {
+  await page.locator(".topbar input[type=file]").setInputFiles([
+    csv("products.csv", "product_id,product_name\n10,Lamp\n11,Notebook\n"),
+    csv("order_lines.csv", "line_id,order_id,item,quantity\n1,1,10,2\n2,2,11,1\n3,3,12,5\n"),
+  ]);
+  await page.waitForSelector('[data-testid="model-review"]', { timeout: 30000 });
+  await page.locator('[data-testid="review-accept"]').click();
+  await page.waitForSelector('[data-testid="entity-fct_order_lines"]');
+  await page.waitForTimeout(800);  // the canvas refits
+  await drag('.react-flow__node[data-id="fct_order_lines"] [data-handleid="r-item"]',
+    '.react-flow__node[data-id="dim_product"] [data-handleid="l-product_key"]');
+  await page.waitForSelector('[data-testid="link-check"]', { timeout: 15000 });
+  assert.match(await page.locator('[data-testid="link-check"]').textContent(), /2 of 3 values found \(1 without a match/);
+  await shot(page, "17c-model-link");
+  await page.locator('[data-testid="link-card"]').getByRole("button", { name: "Link" }).click();
+  await page.waitForFunction(() => /fct_order_lines\.product_key → dim_product\.product_key/.test(document.querySelector(".panel")?.textContent ?? ""));
+});
+
+await step("a CSV source in a pipeline can be modelled, and a model travels in a link", async () => {
+  await page.locator(".topbar").getByRole("tab", { name: "Pipeline" }).click();
+  await page.locator(".topbar").getByRole("button", { name: "Examples" }).click();
+  await page.getByRole("menuitem", { name: /orders revenue/ }).click();
+  await page.locator('.react-flow__node[data-id="customers"] .step-id').click();
+  await page.locator('[data-testid="model-this"]').getByRole("button", { name: "Model this data" }).click();
+  await page.waitForFunction(() => /customers is in the model already/.test(document.querySelector(".toast")?.textContent ?? ""));
+  await page.locator(".topbar").getByRole("button", { name: "Share link" }).click();
+  await page.waitForFunction(() => /#m=/.test(location.href));
+  const link = await page.evaluate(() => location.href);
+  const other = await context.newPage();
+  await other.goto(link);
+  await other.waitForSelector('[data-testid="entity-fct_order_lines"]', { timeout: 60000 });
+  await other.close();
 });
 
 await step("works on a phone-sized screen and in dark mode", async () => {

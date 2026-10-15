@@ -555,6 +555,43 @@ def cmd_model(args) -> int:
         else:
             print(out, end="")
         return 0
+    if args.action == "extend":
+        if len(args.file) < 2:
+            _err("model extend takes a model and the files to add: redcliff model extend model.yaml products.csv")
+            return 2
+        try:
+            import duckdb
+        except ImportError:
+            _err("extend needs DuckDB: pip install 'redcliff[cli]'")
+            return 2
+        from redcliff.extend import apply_changes, extend_files
+
+        model = m.load_model(args.file[0])
+        ext = extend_files(duckdb.connect(), model, Path(args.file[0]).parent, args.file[1:])
+        skip = set(args.skip or [])
+        unknown = skip - {c.id for c in ext.changes}
+        take = set(args.take or [])
+        unknown |= take - {c.id for c in ext.changes}
+        if unknown:
+            _err(f"no such change: {', '.join(sorted(unknown))}")
+            return 2
+        skip |= {x for c in ext.changes if c.id in take for x in c.excludes}  # taking one drops its alternative
+        accepted = [c.id for c in ext.changes if (c.default or c.id in take) and c.id not in skip]
+        for c in ext.changes:
+            mark = "+" if c.id in accepted else " "
+            _err(f"{mark} {c.id}: {c.label}" + (f" ({'; '.join(c.why)})" if c.why else ""))
+        for n in ext.notes:
+            _err(f"  note: {n}")
+        if not ext.changes:
+            _err("nothing to add: the files don't bring new tables or references")
+        out = m.dump_model(apply_changes(model, ext.changes, accepted), "json" if (args.output or "").endswith(".json")
+                           else "yaml")
+        if args.output:
+            Path(args.output).write_text(out, encoding="utf-8")
+            _err(f"wrote {args.output}; skip a change with --skip ID, take one that's off with --take ID")
+        else:
+            print(out, end="")
+        return 0
     if args.action == "map":
         if len(args.file) != 2:
             _err("model map takes a model and a job: redcliff model map model.yaml job.sql")
@@ -769,11 +806,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("model", help="data models: propose one from files, validate, export (DDL, DBML, Mermaid, dbt), "
                                      "import (DDL, DBML), generate the pipeline that loads it, test the loaded tables")
-    p.add_argument("action", choices=["validate", "export", "import", "propose", "map", "pipeline", "test"])
+    p.add_argument("action", choices=["validate", "export", "import", "propose", "extend", "map", "pipeline", "test"])
     p.add_argument("file", nargs="+", help="model.yaml to validate or export; a .sql or .dbml file to import; "
                                            "CSV or Parquet files, or a legacy job (SQL, PowerCenter XML, SSIS .dtsx, "
                                            "Talend .item, DataStage .dsx or a pipeline spec), to propose a model from; "
-                                           "for map, the model then the job")
+                                           "for map, the model then the job; for extend, the model then the "
+                                           "CSV or Parquet files to add to it")
     p.add_argument("--to", choices=["ddl", "dbml", "mermaid", "dbt"], default="ddl", help="export format")
     p.add_argument("--dialect", help="SQL dialect for DDL export or import (default: duckdb)")
     p.add_argument("--name", help="model name for an import or propose; pipeline name for pipeline")
@@ -782,6 +820,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--schema", help="propose/map from legacy SQL: JSON/YAML mapping of table -> {column: type}")
     p.add_argument("--params", help="propose/map from PowerCenter: a parameter file")
     p.add_argument("--mapping", action="append", help="propose/map from PowerCenter: only this mapping (repeatable)")
+    p.add_argument("--skip", action="append", help="extend: leave out this change (repeatable)")
+    p.add_argument("--take", action="append", help="extend: include this change that is off by default (repeatable)")
     p.add_argument("-o", "--output", help="write to this file instead of printing")
     p.set_defaults(func=cmd_model)
 

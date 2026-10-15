@@ -3,7 +3,7 @@ import {
   applyNodeChanges, useReactFlow,
 } from "@xyflow/react";
 import {
-  BookOpen, Boxes, Cable, ChevronDown, CircleCheck, FileCode2, FileSpreadsheet, Layers, Lock, Maximize, Minus,
+  ArrowLeft, BookOpen, Boxes, Cable, ChevronDown, CircleCheck, FileCode2, FileSpreadsheet, Layers, Lock, Maximize, Minus,
   Monitor, Moon, MousePointerClick, Network, Plus, Share2, Sparkles, Sun, Upload, WandSparkles, Waypoints, Workflow,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -11,16 +11,18 @@ import { data } from "./engine/data";
 import { engine, engineReady, startEngine } from "./engine/engine";
 import { ImportDialog, type ImportMode, type ImportSamples } from "./components/ImportDialog";
 import { Inspector, type Tab } from "./components/Inspector";
+import { ModelStart } from "./components/ModelStart";
 import { ModelView, type ModelTab } from "./components/ModelView";
 import { StepNode, type StepNodeType } from "./components/StepNode";
 import { Variables } from "./components/Variables";
 import { fitPadding, layout } from "./layout";
 import { fromImpact, trace, type Highlight } from "./lineage";
 import {
-  defaultParams, refParts, type Analysis, type DataModel, type Impact, type ImportResult, type Scorecard, type ScoreStatus,
-  type Spec, type Step, type StepType, tally, type CheckRun,
+  defaultParams, refParts, type Analysis, type DataModel, type Impact, type ImportResult, type ModelChange, type ModelExtension,
+  type Scorecard, type ScoreStatus, type Spec, type Step, type StepType, tally, type CheckRun,
 } from "./model";
-import { shareLink, specFromHash } from "./share";
+import { extendWith, listTables, proposeFrom, sameSource, tablesInModel, type TableInfo } from "./modelData";
+import { modelFromHash, shareLink, shareModelLink, specFromHash } from "./share";
 import { BrandMark, Menu, MenuItem, useTheme, type Theme } from "./ui";
 
 type Precomputed = { analysis: Analysis; counts: Record<string, number>; impacts: Record<string, Impact> };
@@ -77,13 +79,24 @@ export default function App() {
   const [importing, setImporting] = useState<{
     mode: ImportMode | null; busy: boolean; error: string | null; sample?: "workflow" | "store";
   }>({ mode: null, busy: false, error: null });
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ text: string; action?: { label: string; run: () => void } } | null>(null);
   const [example, setExample] = useState("orders_revenue");
+  // Two modes over the same tables: the pipeline canvas, and the data model.
   const [view, setView] = useState<"pipeline" | "model">("pipeline");
   const [dataModel, setDataModel] = useState<DataModel | null>(null);
   const [modelTab, setModelTab] = useState<ModelTab>("overview");
-  // The legacy job a model was proposed from, so the model view can show the reasons and the coverage.
-  const [job, setJob] = useState<{ spec: Spec; reasons: Record<string, string[]> } | null>(null);
+  const [reasons, setReasons] = useState<Record<string, string[]>>({});
+  // The legacy job a model was proposed from, so the model view can show how much of it the model covers.
+  const [job, setJob] = useState<{ spec: Spec } | null>(null);
+  // What new tables would add to the model, until the person accepts or discards it.
+  const [review, setReview] = useState<{ ext: ModelExtension; tables: string[] } | null>(null);
+  const [tables, setTables] = useState<TableInfo[]>([]);
+  const [start, setStart] = useState<{ preselect: string[]; way?: "data" | "pipeline" | "ddl" | "example";
+    previous: DataModel | null }>({ preselect: [], previous: null });
+  const [modelBusy, setModelBusy] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
+  // The model a pipeline was generated from (Load > Open as a pipeline), to go back to it.
+  const [loadOf, setLoadOf] = useState<string | null>(null);
   useEffect(() => { if (importing.mode) setView("pipeline"); }, [importing.mode]);
   const [theme, setTheme, dark] = useTheme();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -92,10 +105,12 @@ export default function App() {
   const ready = eng.state === "ready";
   const runnable = ready && dataReady;
 
-  const say = useCallback((message: string) => {
-    setToast(message);
-    window.setTimeout(() => setToast((t) => (t === message ? null : t)), 3200);
+  const say = useCallback((message: string, action?: { label: string; run: () => void }) => {
+    const next = { text: message, action };
+    setToast(next);
+    window.setTimeout(() => setToast((t) => (t === next ? null : t)), action ? 7000 : 3200);
   }, []);
+  const refreshTables = useCallback(async () => setTables(await listTables()), []);
 
   // ---------------------------------------------------------------- boot
   useEffect(() => {
@@ -114,10 +129,13 @@ export default function App() {
       setSpec(shared ?? s.specs.orders_revenue);
       setBaseline(shared ?? s.specs.orders_revenue);
       if (shared) setExample("");
+      const sharedModel = await modelFromHash(window.location.hash);
+      if (sharedModel) { setDataModel(sharedModel); setView("model"); }
       // Python first, with the whole connection to itself; DuckDB (previews) after.
       await engineReady.catch(() => undefined);
       await data.start();
       await data.loadSamples(BASE, s.tables);
+      setTables(await listTables());
       setDataReady(true);
     })();
     dataLoaded.current = boot;
@@ -367,6 +385,7 @@ export default function App() {
 
   // ---------------------------------------------------------------- actions
   const loaded = (r: ImportResult, label: string) => {
+    setLoadOf(null);
     replaceSpec(r.spec, false);
     setNotes(r.warnings);
     setScorecard(r.scorecard);
@@ -405,6 +424,7 @@ export default function App() {
 
   const loadExample = (name: string) => {
     if (!samples) return;
+    setLoadOf(null);
     setExample(name);
     replaceSpec(samples.specs[name], false);
     setNotes([]);
@@ -414,25 +434,111 @@ export default function App() {
     if (tab === "migration") setTab("step");
   };
 
+  // ---------------------------------------------------------------- data models
+  /** Grow the model with tables: what they add comes back as changes to review. */
+  const grow = async (names: string[], model: DataModel | null = dataModel) => {
+    if (!model || !names.length) return;
+    setView("model");
+    setModelTab("overview");
+    setModelBusy(true);
+    try {
+      const ext = await extendWith(model, names);
+      setReview({ ext, tables: names });
+      if (!ext.changes.length) say(`Nothing to add from ${names.join(", ")}`);
+    } catch (e) {
+      say(`Couldn't read the tables: ${String((e as Error).message ?? e)}`);
+    } finally {
+      setModelBusy(false);
+    }
+  };
+
+  /** Model these tables: grow the model you have, or start one with them ticked. */
+  const modelTables = (names: string[]) => {
+    setView("model");
+    if (!dataModel) { setStart((st) => ({ ...st, preselect: names, way: "data" })); return; }
+    const inModel = tablesInModel(dataModel, tables);
+    const fresh = names.filter((n) => !inModel.has(n));
+    if (fresh.length) void grow(fresh);
+    else say(`${names.join(", ")} ${names.length === 1 ? "is" : "are"} in the model already`);
+  };
+
+  const propose = async (names: string[], style: "kimball" | "data_vault") => {
+    setModelBusy(true);
+    setModelError(null);
+    try {
+      const r = await proposeFrom(names, style, "proposed");
+      setDataModel(r.model);
+      setReasons(r.reasons);
+      setJob(null);
+      setReview(null);
+      setModelTab("overview");
+      say(`Proposed ${r.model.entities.length} entities from ${names.length} ${names.length === 1 ? "table" : "tables"}; click one to see why`);
+    } catch (e) {
+      setModelError(String((e as Error).message ?? e));
+    } finally {
+      setModelBusy(false);
+    }
+  };
+
+  const onReviewed = (model: DataModel | null, accepted: ModelChange[]) => {
+    setReview(null);
+    if (!model) return;
+    setDataModel(model);
+    setReasons((old) => {
+      const next = { ...old };
+      for (const c of accepted) {
+        Object.assign(next, c.reasons ?? {});
+        if (c.relationship && c.why.length) next[c.relationship.from] = c.why;
+      }
+      return next;
+    });
+    say(`Added ${accepted.length} ${accepted.length === 1 ? "change" : "changes"} to ${model.name}`);
+  };
+
   const addFiles = async (files: FileList | File[]) => {
-    if (!spec) return;
+    const added: string[] = [];
     let next = spec;
     for (const file of Array.from(files)) {
       if (!/\.csv$/i.test(file.name)) { say(`${file.name} isn't a CSV file`); continue; }
-      const { table, columns } = await data.addCsv(file.name, await file.text());
-      const id = uniqueId(next, table);
-      next = { ...next, nodes: [...next.nodes, { id, type: "source", params: { format: "csv", path: file.name, columns } }] };
-      say(`Added ${file.name} as a source`);
+      const r = await data.addCsv(file.name, await file.text());
+      added.push(r.table);
+      if (view === "pipeline" && next && !next.nodes.some((n) => n.type === "source" && n.params?.path === r.file)) {
+        const id = uniqueId(next, r.table);
+        next = { ...next, nodes: [...next.nodes, { id, type: "source", params: { format: "csv", path: r.file, columns: r.columns } }] };
+      }
+      if (r.renamed) say(`${file.name} is the table ${r.table}: the name ${r.table.replace(/_\d+$/, "")} was taken`);
     }
-    replaceSpec(next);
+    await refreshTables();
+    if (!added.length) return;
+    const what = added.length === 1 ? added[0] : `${added.length} tables`;
+    if (view === "pipeline") {
+      if (next && next !== spec) replaceSpec(next);
+      say(`Added ${what} as ${added.length === 1 ? "a source" : "sources"}`, { label: "Model it", run: () => modelTables(added) });
+    } else if (dataModel && !review) {
+      void grow(added);
+    } else if (!dataModel) {
+      setStart((st) => ({ ...st, preselect: [...new Set([...st.preselect, ...added])], way: "data" }));
+      say(`Added ${what}; tick what to model`);
+    } else {
+      say(`Added ${what}; add it to the model once you've finished this review`);
+    }
   };
 
-  const openModel = (m: DataModel | null, t: ModelTab = "overview") => {
-    const next = m ?? dataModel ?? (samples ? Object.values(samples.models)[0] : null);
-    if (!next) return;
-    if (m) setJob(null);
-    setDataModel(next);
-    setModelTab(t);
+  const openModel = (m: DataModel) => {
+    setJob(null);
+    setReview(null);
+    setReasons({});
+    setDataModel(m);
+    setModelTab("overview");
+    setView("model");
+  };
+
+  const newModel = (way?: "data" | "pipeline" | "ddl" | "example") => {
+    setStart({ preselect: [], way, previous: dataModel });
+    setDataModel(null);
+    setReview(null);
+    setJob(null);
+    setModelError(null);
     setView("model");
   };
 
@@ -440,22 +546,31 @@ export default function App() {
     if (!spec) return;
     const r = await engine.modelFromJob(spec, style);
     if (!r.ok) { say(`Couldn't propose a model: ${r.error}`); return; }
-    setJob({ spec, reasons: r.reasons });
+    setJob({ spec });
+    setReasons(r.reasons);
+    setReview(null);
     setDataModel(r.model);
     setModelTab("overview");
     setView("model");
     say(`Proposed ${r.model.entities.length} entities from ${spec.name}; ${Math.round(r.map.coverage * 100)}% of what it writes comes from them`);
   };
 
+  /** The table a pipeline's CSV source reads, if the playground has it. */
+  const tableOf = (step: Step | null) =>
+    step?.type === "source" && step.params?.format === "csv"
+      ? tables.find((t) => sameSource(t.file, String(step.params?.path ?? "")))?.name ?? null : null;
+
   const share = async () => {
-    if (!spec) return;
-    const url = await shareLink(spec);
+    const modelMode = view === "model";
+    if (modelMode ? !dataModel : !spec) return;
+    const url = modelMode ? await shareModelLink(dataModel!) : await shareLink(spec!);
     window.history.replaceState(null, "", url);
+    const what = modelMode ? "The model lives in the link (your data doesn't)" : "The pipeline lives in the link";
     try {
       await navigator.clipboard.writeText(url);
-      say("Link copied. The pipeline lives in the link; nothing is uploaded.");
+      say(`Link copied. ${what}; nothing is uploaded.`);
     } catch {
-      say("The link is in the address bar. Nothing is uploaded.");
+      say(`The link is in the address bar. ${what}; nothing is uploaded.`);
     }
   };
 
@@ -466,13 +581,25 @@ export default function App() {
   const nextTheme: Record<Theme, Theme> = { system: "light", light: "dark", dark: "system" };
 
   return (
-    <div className="app">
+    <div className="app" onDragOver={(e) => { if (view === "model") e.preventDefault(); }}
+      onDrop={(e) => { if (view === "model" && e.dataTransfer.files.length) { e.preventDefault(); void addFiles(e.dataTransfer.files); } }}>
       {view === "model" && dataModel && (
-        <ModelView model={dataModel} engineReady={ready} dataReady={dataReady} tab={modelTab} onTab={setModelTab} job={job} onClearJob={() => setJob(null)}
+        <ModelView model={dataModel} engineReady={ready} dataReady={dataReady} tab={modelTab} onTab={setModelTab} job={job}
+          reasons={reasons} review={review} onReviewed={onReviewed} tables={tables} onGrow={(names) => void grow(names)}
+          onAddFiles={(f) => void addFiles(f)} onNewModel={() => newModel()}
           onChange={(m, note) => { setDataModel(m); if (note) say(note); }}
           onOpenPipeline={(s) => { setView("pipeline"); setExample(""); replaceSpec(s, false); setNotes([]); setScorecard(null);
-            setSelectedId(null); say(`Opened ${s.name}: the load generated from the model`); }} />
+            setSelectedId(null); setLoadOf(dataModel.name); say(`Opened ${s.name}: the load generated from the model`); }} />
       )}
+      {view === "model" && !dataModel && (
+        <ModelStart tables={tables} preselect={start.preselect} initialWay={start.way} engineReady={ready} dataReady={dataReady}
+          busy={modelBusy} error={modelError} spec={spec} examples={samples?.models ?? {}}
+          onPropose={(names, style) => void propose(names, style)} onFromPipeline={(style) => void modelFromJob(style)}
+          onImported={(m, note) => { openModel(m); if (note) say(note); }} onExample={openModel}
+          onAddFiles={(f) => void addFiles(f)}
+          previous={start.previous?.name} onBack={() => start.previous && setDataModel(start.previous)} />
+      )}
+      {view === "model" && modelBusy && dataModel && <div className="busy-chip glass" role="status">Reading the tables…</div>}
       {view === "pipeline" && <main
         className="canvas"
         onDragOver={(e) => e.preventDefault()}
@@ -522,18 +649,30 @@ export default function App() {
               onChange={(e) => setSpec({ ...spec, name: e.target.value })}
             />
           )}
+          {view === "pipeline" && loadOf && !scorecard && (
+            <button className="chip" onClick={() => setView("model")} title="Back to the model this pipeline loads"
+              data-testid="loads-model">
+              <ArrowLeft />Loads {loadOf}
+            </button>
+          )}
           {view === "pipeline" && scorecard && (
             <button className="chip ok" onClick={() => setTab("migration")} title="Open the migration scorecard">
               <CircleCheck />{Math.round(scorecard.automated * 100)}% automatic
             </button>
           )}
         </div>
-        <nav className="bar-actions" aria-label="Pipeline">
-          {view === "model" && (
-            <button className="btn ghost" onClick={() => setView("pipeline")} aria-label="Pipelines" title="Back to the pipeline canvas">
-              <Waypoints /><span className="label">Pipelines</span>
-            </button>
-          )}
+        <div className="mode-switch-bar segmented" role="tablist" aria-label="Mode">
+          <button role="tab" aria-selected={view === "pipeline"} aria-pressed={view === "pipeline"} onClick={() => setView("pipeline")}
+            title="The pipeline canvas: steps, lineage, code" aria-label="Pipeline">
+            <Waypoints /><span className="label">Pipeline</span>
+          </button>
+          <button role="tab" aria-selected={view === "model"} aria-pressed={view === "model"} onClick={() => setView("model")}
+            title="The data model: entities, keys, history, relationships" aria-label="Model">
+            <Layers /><span className="label">Model</span>
+            {dataModel && <span className="mode-count">{dataModel.entities.length}</span>}
+          </button>
+        </div>
+        <nav className="bar-actions" aria-label="Actions">
           <Menu
             label="Examples"
             button={({ open, toggle }) => (
@@ -554,7 +693,7 @@ export default function App() {
                 {samples && Object.entries(samples.models).map(([k, m]) => (
                   <MenuItem key={k} icon={Layers} title={k.replace(/_/g, " ")}
                     sub={`${m.style === "data_vault" ? "Data Vault" : "Kimball"}: ${m.entities.map((e) => e.id).join(", ")}`}
-                    checked={view === "model" && dataModel?.name === m.name} onClick={() => { close(); openModel(m); }} />
+                    checked={view === "model" && dataModel?.name === m.name && !review} onClick={() => { close(); openModel(m); }} />
                 ))}
                 <div className="menu-sep" />
                 <div className="menu-label">Legacy jobs to import</div>
@@ -575,16 +714,19 @@ export default function App() {
               </>
             )}
           </Menu>
-          <button className="btn ghost" onClick={() => fileInput.current?.click()} disabled={!runnable || view !== "pipeline"} aria-label="Add CSV" title="Add CSV files as sources">
+          <button className="btn ghost" onClick={() => fileInput.current?.click()} disabled={!runnable} aria-label="Add CSV"
+            title={view === "pipeline" ? "Add CSV files as sources" : "Add CSV files to the model"}>
             <FileSpreadsheet /><span className="label">Add CSV</span>
           </button>
-          <input ref={fileInput} type="file" accept=".csv" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
+          <input ref={fileInput} type="file" accept=".csv" multiple hidden
+            onChange={(e) => { if (e.target.files?.length) void addFiles(e.target.files); e.target.value = ""; }} />
           <button className="btn ghost icon" onClick={() => setTheme(nextTheme[theme])}
             aria-label={`Theme: ${theme}`} title={`Theme: ${theme}`}>
             <ThemeIcon />
           </button>
           <span className="bar-divider" />
-          <button className="btn" onClick={share} disabled={!spec || view !== "pipeline"} aria-label="Share link" title="Copy a link that holds this pipeline">
+          <button className="btn" onClick={share} disabled={view === "pipeline" ? !spec : !dataModel} aria-label="Share link"
+            title={view === "pipeline" ? "Copy a link that holds this pipeline" : "Copy a link that holds this model"}>
             <Share2 /><span className="label">Share</span>
           </button>
           <Menu
@@ -609,8 +751,8 @@ export default function App() {
                 <MenuItem icon={Cable} title="IBM DataStage" sub=".dsx parallel jobs, with a migration scorecard"
                   onClick={() => { close(); setView("pipeline"); setImporting({ mode: "datastage", busy: false, error: null }); }} />
                 <div className="menu-sep" />
-                <MenuItem icon={Layers} title="Data model" sub="Propose one from your data, or paste DDL or DBML"
-                  onClick={() => { close(); openModel(null, "import"); }} />
+                <MenuItem icon={Layers} title="Data model" sub="CREATE TABLE statements or DBML"
+                  onClick={() => { close(); newModel("ddl"); }} />
               </>
             )}
           </Menu>
@@ -650,6 +792,8 @@ export default function App() {
           baseline={baseline}
           onRebase={() => setBaseline(spec)}
           onModelFromJob={(style) => void modelFromJob(style)}
+          tableOf={tableOf}
+          onModelTable={(t) => modelTables([t])}
           analysis={analysis}
           selected={selected}
           impact={impact}
@@ -686,7 +830,11 @@ export default function App() {
         <span className="local"><Lock />Runs in your browser</span>
       </footer>
 
-      {toast && <div className="toast" role="status"><Sparkles />{toast}</div>}
+      {toast && (
+        <div className="toast" role="status"><Sparkles />{toast.text}
+          {toast.action && <button className="toast-action" onClick={() => { toast.action!.run(); setToast(null); }}>{toast.action.label}</button>}
+        </div>
+      )}
 
       {eng.state === "failed" && (
         <div className="boot" role="alert">

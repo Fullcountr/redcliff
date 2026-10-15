@@ -1,5 +1,5 @@
-// Share a pipeline as a link: the spec is compressed into the URL hash, never uploaded.
-import type { Spec } from "./model";
+// Share a pipeline or a data model as a link: it is compressed into the URL hash, never uploaded.
+import type { DataModel, Spec } from "./model";
 
 function toBase64Url(bytes: Uint8Array): string {
   let s = "";
@@ -17,20 +17,26 @@ async function pipe(bytes: Uint8Array, stream: CompressionStream | Decompression
   return new Uint8Array(out);
 }
 
-export async function shareLink(spec: Spec): Promise<string> {
-  const packed = await pipe(new TextEncoder().encode(JSON.stringify(spec)), new CompressionStream("deflate-raw"));
+async function pack(value: unknown, key: string): Promise<string> {
+  const packed = await pipe(new TextEncoder().encode(JSON.stringify(value)), new CompressionStream("deflate-raw"));
   const url = new URL(window.location.href);
-  url.hash = `p=${toBase64Url(packed)}`;
+  url.hash = `${key}=${toBase64Url(packed)}`;
   return url.toString();
 }
 
-export async function specFromHash(hash: string): Promise<Spec | null> {
-  const match = hash.match(/[#&]p=([A-Za-z0-9_-]+)/);
+async function unpack<T>(hash: string, key: string): Promise<T | null> {
+  const match = hash.match(new RegExp(`[#&]${key}=([A-Za-z0-9_-]+)`));
   if (!match) return null;
   try {
     const raw = await pipe(fromBase64Url(match[1]), new DecompressionStream("deflate-raw"));
-    return JSON.parse(new TextDecoder().decode(raw)) as Spec;
+    return JSON.parse(new TextDecoder().decode(raw)) as T;
   } catch {
     return null;
   }
 }
+
+export const shareLink = (spec: Spec) => pack(spec, "p");
+export const specFromHash = (hash: string) => unpack<Spec>(hash, "p");
+/** A data model's link opens the playground in Model mode. The data isn't in it. */
+export const shareModelLink = (model: DataModel) => pack(model, "m");
+export const modelFromHash = (hash: string) => unpack<DataModel>(hash, "m");

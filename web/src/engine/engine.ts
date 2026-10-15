@@ -1,5 +1,10 @@
 // Promise-based client for the Pyodide engine worker.
-import type { Analysis, DataModel, Impact, ImportResult, JobMap, ModelAnalysis, ModelExport, Spec } from "../model";
+import type {
+  Analysis, DataModel, Impact, ImportResult, JobMap, ModelAnalysis, ModelChange, ModelExport, ModelExtension, Spec,
+} from "../model";
+
+/** Tables by name, each a {column: type} map, as DuckDB describes them. */
+type Tables = Record<string, Record<string, string>>;
 
 type Result<T> = ({ ok: true } & T) | { ok: false; error: string; issues?: string[] };
 
@@ -72,16 +77,28 @@ export const engine = {
     call<{ code: string }>("model_export", JSON.stringify(model), fmt, dialect ?? null),
   modelProfileQueries: (tables: Record<string, Record<string, string>>) =>
     call<{ queries: Record<string, string> }>("model_profile_queries", JSON.stringify(tables)),
-  modelReferenceQueries: (tables: Record<string, Record<string, string>>, rows: Record<string, unknown[]>) =>
+  modelReferenceQueries: (tables: Tables, rows: Record<string, unknown[]>, files: Record<string, string>, only?: string[]) =>
     call<{ checks: { ref: [string, string, string, string]; sql: string }[] }>(
-      "model_reference_queries", JSON.stringify(tables), JSON.stringify(rows)),
-  modelPropose: (tables: Record<string, Record<string, string>>, rows: Record<string, unknown[]>, held: string[][], name: string) =>
+      "model_reference_queries", JSON.stringify(tables), JSON.stringify(rows), JSON.stringify(files), JSON.stringify(only ?? null)),
+  modelPropose: (tables: Tables, rows: Record<string, unknown[]>, held: string[][], name: string,
+                 files: Record<string, string>, style: "kimball" | "data_vault") =>
     call<{ model: DataModel; reasons: Record<string, string[]> }>(
-      "model_propose", JSON.stringify(tables), JSON.stringify(rows), JSON.stringify(held), name),
+      "model_propose", JSON.stringify(tables), JSON.stringify(rows), JSON.stringify(held), name, JSON.stringify(files), style),
+  modelExtend: (model: DataModel, tables: Tables, rows: Record<string, unknown[]>, held: string[][], fresh: string[],
+                files: Record<string, string>) =>
+    call<ModelExtension>("model_extend", JSON.stringify(model), JSON.stringify(tables), JSON.stringify(rows),
+      JSON.stringify(held), JSON.stringify(fresh), JSON.stringify(files)),
+  modelApply: (model: DataModel, changes: ModelChange[], accepted: string[]) =>
+    call<{ model: DataModel }>("model_apply", JSON.stringify(model), JSON.stringify(changes), JSON.stringify(accepted)),
+  modelLink: (model: DataModel, source: string, target: string) =>
+    call<{ model: DataModel; done: string[] }>("model_link", JSON.stringify(model), source, target),
+  modelLinkCheck: (model: DataModel, source: string, target: string, tables: Record<string, string>) =>
+    call<{ sql: string | null; reason?: string }>("model_link_check", JSON.stringify(model), source, target, JSON.stringify(tables)),
   modelFromJob: (spec: Spec, style: "kimball" | "data_vault") =>
     call<{ model: DataModel; reasons: Record<string, string[]>; map: JobMap }>("model_from_job", JSON.stringify(spec), style),
   modelMap: (model: DataModel, spec: Spec) => call<JobMap>("model_map", JSON.stringify(model), JSON.stringify(spec)),
-  modelLoadPipeline: (model: DataModel) => call<{ spec: Spec; targets: string[] }>("model_load_pipeline", JSON.stringify(model)),
+  modelLoadPipeline: (model: DataModel, headers?: Record<string, string[]>) =>
+    call<{ spec: Spec; targets: string[] }>("model_load_pipeline", JSON.stringify(model), JSON.stringify(headers ?? {})),
   modelImport: (text: string, fmt: "ddl" | "dbml", dialect: string | null, name: string) =>
     call<{ model: DataModel; warnings: string[] }>("model_import", text, fmt, dialect, name),
 };

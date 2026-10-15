@@ -63,6 +63,18 @@ for (const theme of ["light", "dark"]) {
   await page.waitForSelector('[data-testid="model-valid"]', { timeout: 30000 });
   await page.waitForFunction(() => document.querySelectorAll(".react-flow__edge.rel").length === 2);
   await shot(page, "data-model", theme);
+
+  // Growing it: two CSVs added, what they add up for review on the canvas.
+  await page.locator(".topbar input[type=file]").setInputFiles([
+    { name: "statuses.csv", mimeType: "text/csv", buffer: Buffer.from("status,description\nshipped,Left the warehouse\n"
+      + "pending,Waiting for payment\ncancelled,Cancelled by the customer\n") },
+    { name: "orders_october.csv", mimeType: "text/csv", buffer: Buffer.from("order_id,customer_id,order_date,status,amount\n"
+      + "20,101,2026-10-01,shipped,40.00\n21,103,2026-10-02,cancelled,50.00\n") },
+  ]);
+  await page.waitForSelector('[data-testid="model-review"]', { timeout: 30000 });
+  await page.waitForSelector('[data-testid="entity-dim_status"] .new-badge');
+  await page.waitForTimeout(600);
+  await shot(page, "model-grow", theme);
   await page.context().close();
 
   // A legacy job proposed as a model, with what the model covers.

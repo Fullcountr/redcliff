@@ -995,3 +995,98 @@ td.rowno { color: var(--text-3); }
 .job-map-list li .from { font-size: 11px; padding-left: 10px; }
 .job-map-list li.is-gap { box-shadow: inset 2px 0 var(--bad); }
 .bad-text { color: var(--bad); }
+
+/* ------------------------------------------------------------------ modes: pipeline | model */
+.mode-switch-bar { flex: none; }
+.mode-switch-bar button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; font-size: 12.5px; }
+.mode-switch-bar svg { width: 14px; height: 14px; }
+.mode-count {
+  font-size: 10.5px; font-weight: 650; min-width: 16px; padding: 0 5px; border-radius: 999px; line-height: 16px;
+  background: var(--oxide-soft); color: var(--oxide); font-variant-numeric: tabular-nums; text-align: center;
+}
+.toast-action {
+  margin-left: 6px; border: 0; border-radius: 6px; padding: 3px 9px; cursor: pointer;
+  background: color-mix(in srgb, var(--inverse-text) 16%, transparent); color: var(--inverse-text);
+  font: inherit; font-weight: 650;
+}
+.toast-action:hover { background: color-mix(in srgb, var(--inverse-text) 26%, transparent); }
+.chip.tiny { height: 17px; padding: 0 6px; font-size: 10.5px; color: var(--oxide); background: var(--oxide-soft); border-color: transparent; }
+.ok-text { color: var(--ok); }
+.warn-text { color: var(--warn); }
+.small-note { font-size: 12px; margin-top: 10px; }
+label.btn.is-disabled { opacity: 0.5; pointer-events: none; }
+.busy-chip {
+  position: absolute; top: calc(var(--gap) * 2 + var(--bar-h)); left: 50%; transform: translateX(-50%);
+  padding: 6px 12px; border-radius: 999px; font-size: 12.5px; color: var(--text-2); z-index: 16;
+}
+
+/* the start screen */
+.model-start { display: grid; place-items: center; overflow-y: auto; padding: calc(var(--gap) * 3 + var(--bar-h)) 16px 70px; }
+.start-card { width: min(760px, 100%); padding: 26px; border-radius: var(--r-xl); }
+.start-head { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 18px; }
+.start-head h1 { font-size: 19px; letter-spacing: -0.02em; margin: 0 0 4px; font-weight: 650; }
+.start-head p { margin: 0; }
+.start-icon {
+  flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 11px;
+  background: color-mix(in srgb, var(--t-source) 14%, transparent); color: var(--t-source);
+}
+.start-icon svg { width: 20px; height: 20px; }
+.start-ways { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+.start-way {
+  display: flex; gap: 9px; align-items: flex-start; text-align: left; padding: 10px; cursor: pointer;
+  border-radius: var(--r-md); border: 1px solid var(--line); background: var(--surface); color: var(--text);
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+.start-way:hover { border-color: var(--line-2); }
+.start-way.is-active { border-color: var(--oxide-line); box-shadow: var(--ring); }
+.start-way svg { width: 16px; height: 16px; flex: none; margin-top: 1px; color: var(--text-2); }
+.start-way.is-active svg { color: var(--oxide); }
+.start-way > span { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
+.start-way .quiet { font-size: 11.5px; line-height: 1.35; }
+.start-body { border-top: 1px solid var(--line); padding-top: 14px; }
+.start-body .pick-list { max-height: 260px; overflow-y: auto; }
+.example-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.btn.wide { width: 100%; justify-content: flex-start; height: auto; padding: 8px 10px; text-align: left; }
+.btn.wide > span { display: flex; flex-direction: column; gap: 2px; }
+
+/* growing a model: the review */
+.review { border: 1px solid var(--oxide-line); background: color-mix(in srgb, var(--oxide-soft) 50%, transparent);
+  border-radius: var(--r-md); padding: 12px; }
+.change-list { list-style: none; margin: 8px 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.change-list li { padding: 7px 8px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); }
+.change-list li:not(.is-on) { opacity: 0.6; }
+.change-list li.is-blocked { opacity: 0.6; border-style: dashed; }
+.change-list label { display: flex; align-items: center; gap: 7px; cursor: pointer; font-size: 12px; }
+.change-list label svg { width: 13px; height: 13px; flex: none; color: var(--oxide); }
+.change-list .mono { overflow-wrap: anywhere; }
+.change-list .why { font-size: 11.5px; margin: 3px 0 0 22px; }
+.new-model { margin-top: 14px; }
+.model-this { padding: 10px 12px; border-radius: var(--r-md); background: var(--sunk); border: 1px solid var(--line); }
+.model-this .row { gap: 8px; }
+
+/* new parts in a review, and drawing links */
+.entity.is-new { outline: 2px dashed var(--oxide); outline-offset: 4px; box-shadow: var(--shadow-md); }
+.attr.is-new { background: var(--oxide-soft); color: var(--text); }
+.new-badge {
+  margin-left: 6px; font-family: var(--font-sans); font-size: 9.5px; font-weight: 700; letter-spacing: 0.03em;
+  text-transform: uppercase; padding: 1px 5px; border-radius: 4px; background: var(--oxide); color: #fff; vertical-align: 1px;
+}
+.react-flow__edge.rel.is-new path { stroke: var(--oxide); stroke-dasharray: 5 4; }
+.react-flow__node:hover .attr-handle { opacity: 0.55; background: var(--oxide); }
+.attr:hover .attr-handle, .react-flow__handle.connectingfrom, .react-flow__handle.connectingto { opacity: 1 !important; background: var(--oxide); }
+.attr-handle { width: 8px; height: 8px; }
+.link-card {
+  position: absolute; top: calc(var(--gap) * 2 + var(--bar-h)); left: calc((100vw - var(--inspector-w) - var(--gap)) / 2);
+  transform: translateX(-50%); width: min(420px, calc(100vw - 32px)); padding: 12px 14px; border-radius: var(--r-md);
+  z-index: 25; font-size: 12.5px;
+}
+.link-card p { margin: 6px 0 10px; }
+.link-card .row { gap: 6px; }
+
+@media (max-width: 900px) {
+  .mode-switch-bar button { padding: 0 8px; }
+  .mode-switch-bar .label { display: none; }
+  .start-ways { grid-template-columns: 1fr 1fr; }
+  .model-start { place-items: start center; padding-bottom: 20px; }
+  .link-card { left: 50%; }
+}

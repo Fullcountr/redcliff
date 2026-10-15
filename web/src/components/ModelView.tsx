@@ -1,23 +1,26 @@
-// The data model view: entities as cards, relationships as edges, and a panel to check, export
-// and import the model. Read-only on the canvas (M1); edits go through the YAML tab or an import.
+// Model mode: entities as cards, relationships as edges, and a panel to check, grow, export and load
+// the model. New tables are added as a reviewed set of changes (core/src/redcliff/extend.py); a
+// relationship can be drawn by dragging from an attribute to a dimension's key.
 import dagre from "@dagrejs/dagre";
 import {
-  Background, BackgroundVariant, Handle, Position, ReactFlow, ReactFlowProvider, useReactFlow,
-  type Edge, type Node, type NodeProps,
+  Background, BackgroundVariant, ConnectionMode, Handle, Position, ReactFlow, ReactFlowProvider, useReactFlow,
+  type Connection, type Edge, type Node, type NodeProps,
 } from "@xyflow/react";
 import * as yaml from "js-yaml";
 import {
-  Check, CircleAlert, CircleCheck, CircleDot, Copy, Download, FileCode2, FileInput, Layers, Link2, Maximize, Minus,
-  Orbit, Plus, ScrollText, Sigma, Table2, Workflow, type LucideIcon,
+  Check, CircleAlert, CircleCheck, CircleDot, Copy, Download, FileCode2, FileSpreadsheet, Layers, Link2, Maximize, Minus,
+  Orbit, Plus, Rows3, ScrollText, Sigma, Table2, Workflow, type LucideIcon,
 } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
-import { data } from "../engine/data";
 import { engine } from "../engine/engine";
-import type { DataModel, EntityKind, JobMap, ModelAnalysis, ModelEntity, ModelExport, Spec } from "../model";
+import type {
+  DataModel, EntityKind, JobMap, ModelAnalysis, ModelChange, ModelEntity, ModelExport, ModelExtension, Spec,
+} from "../model";
+import { checkLink, csvHeaders, tablesInModel, type LinkCheck, type TableInfo } from "../modelData";
 import { fitPadding } from "../layout";
 import { highlight } from "../ui";
 
-export type ModelTab = "overview" | "load" | "export" | "yaml" | "import";
+export type ModelTab = "overview" | "load" | "export" | "yaml";
 
 const KIND: Record<EntityKind, { icon: LucideIcon; label: string; color: string }> = {
   dimension: { icon: Layers, label: "Dimension", color: "var(--t-source)" },
@@ -50,20 +53,23 @@ export function entityKey(e: ModelEntity): string[] {
 
 const isScd2 = (e: ModelEntity) => e.kind === "dimension" && (e.history ?? "scd2") === "scd2";
 
-type EntityData = { entity: ModelEntity; fks: Set<string>; selected: boolean; dimmed: boolean };
+type EntityData = {
+  entity: ModelEntity; fks: Set<string>; selected: boolean; dimmed: boolean;
+  isNew?: boolean; newAttrs?: Set<string>; // in a review: what the changes add
+};
 type EntityNodeType = Node<EntityData, "entity">;
 
 const EntityNode = memo(function EntityNode({ data }: NodeProps<EntityNodeType>) {
-  const { entity: e, fks, selected, dimmed } = data;
+  const { entity: e, fks, selected, dimmed, isNew, newAttrs } = data;
   const kind = KIND[e.kind] ?? KIND.table;
   const key = new Set(entityKey(e));
   return (
-    <div className={`entity${selected ? " is-selected" : ""}${dimmed ? " is-dimmed" : ""}`}
+    <div className={`entity${selected ? " is-selected" : ""}${dimmed ? " is-dimmed" : ""}${isNew ? " is-new" : ""}`}
       style={{ "--t": kind.color } as React.CSSProperties} data-testid={`entity-${e.id}`}>
       <div className="step-head">
         <span className="step-icon"><kind.icon /></span>
         <span className="step-titles">
-          <span className="step-id">{e.id}</span>
+          <span className="step-id">{e.id}{isNew && <span className="new-badge">new</span>}</span>
           <span className="step-type">
             {kind.label}
             {e.kind === "dimension" && <> · {isScd2(e) ? "SCD2" : "SCD1"}</>}
@@ -81,7 +87,8 @@ const EntityNode = memo(function EntityNode({ data }: NodeProps<EntityNodeType>)
             a.track === false && ["skip", "Not tracked: a change doesn't make a new version"],
           ].filter(Boolean) as [string, string][];
           return (
-            <li key={a.name} className={`attr${key.has(a.name) ? " is-key" : ""}`} title={a.description || undefined}>
+            <li key={a.name} className={`attr${key.has(a.name) ? " is-key" : ""}${newAttrs?.has(a.name) ? " is-new" : ""}`}
+              title={a.description || undefined}>
               <Handle type="source" position={Position.Right} id={`r-${a.name}`} className="attr-handle" />
               <Handle type="target" position={Position.Left} id={`l-${a.name}`} className="attr-handle" />
               <span className="attr-name">{a.name}</span>
@@ -122,9 +129,18 @@ type Props = {
   onTab: (t: ModelTab) => void;
   onChange: (m: DataModel, note?: string) => void;
   onOpenPipeline: (spec: Spec) => void;
-  /** The legacy job the model was proposed from: its reasons, and the job to map onto the model. */
-  job?: { spec: Spec; reasons: Record<string, string[]> } | null;
-  onClearJob?: () => void;
+  /** Why each entity and attribute is what it is, from a proposal or an extension. */
+  reasons: Record<string, string[]>;
+  /** The legacy job the model was proposed from, to map onto the model. */
+  job?: { spec: Spec } | null;
+  /** What new tables would add, waiting for the person to accept or skip each change. */
+  review: { ext: ModelExtension; tables: string[] } | null;
+  onReviewed: (model: DataModel | null, accepted: ModelChange[]) => void;
+  /** Tables the playground has, for adding to the model. */
+  tables: TableInfo[];
+  onGrow: (tables: string[]) => void;
+  onAddFiles: (files: FileList) => void;
+  onNewModel: () => void;
 };
 
 export function ModelView(props: Props) {
@@ -135,21 +151,54 @@ export function ModelView(props: Props) {
   );
 }
 
-function ModelCanvas({ model, engineReady, dataReady, tab, onTab, onChange, onOpenPipeline, job, onClearJob }: Props) {
+/** The changes a set of ticked ones really brings: an unticked change takes out what needs it. */
+export function effective(changes: ModelChange[], ticked: Set<string>): Set<string> {
+  const byId = new Map(changes.map((c) => [c.id, c]));
+  const ok = (c: ModelChange, seen = new Set<string>()): boolean =>
+    ticked.has(c.id) && !seen.has(c.id) && c.needs.every((n) => !byId.has(n) || ok(byId.get(n)!, new Set([...seen, c.id])));
+  return new Set(changes.filter((c) => ok(c)).map((c) => c.id));
+}
+
+function ModelCanvas(props: Props) {
+  const { model, engineReady, tab, onTab, onChange, onOpenPipeline, reasons, job, review, onReviewed } = props;
   const flow = useReactFlow();
-  const [reasons, setReasons] = useState<Record<string, string[]>>(job?.reasons ?? {});
   const [jobMap, setJobMap] = useState<JobMap | null>(null);
-  useEffect(() => { setReasons(job?.reasons ?? {}); }, [job]);
   useEffect(() => {
     if (!job || !engineReady) { setJobMap(null); return; }
     let live = true;
     engine.modelMap(model, job.spec).then((r) => { if (live) setJobMap(r.ok ? r : null); });
     return () => { live = false; };
   }, [model, job, engineReady]);
+
+  // A review shows the model as it would be with the ticked changes, the new parts marked.
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const [preview, setPreview] = useState<DataModel | null>(null);
+  useEffect(() => { setTicked(new Set(review?.ext.changes.filter((c) => c.default).map((c) => c.id) ?? [])); }, [review]);
+  const accepted = useMemo(() => effective(review?.ext.changes ?? [], ticked), [review, ticked]);
+  useEffect(() => {
+    if (!review || !engineReady) { setPreview(null); return; }
+    let live = true;
+    engine.modelApply(model, review.ext.changes, [...accepted]).then((r) => { if (live && r.ok) setPreview(r.model); });
+    return () => { live = false; };
+  }, [model, review, accepted, engineReady]);
+  const shown = review && preview ? preview : model;
+  const fresh = useMemo(() => {
+    const ids = new Set(model.entities.map((e) => e.id));
+    const rels = new Set((model.relationships ?? []).map((r) => `${r.from}->${r.to}`));
+    const attrs = new Set(model.entities.flatMap((e) => e.attributes.map((a) => `${e.id}.${a.name}`)));
+    return {
+      entities: new Set(shown.entities.filter((e) => !ids.has(e.id)).map((e) => e.id)),
+      relationships: new Set((shown.relationships ?? []).map((r) => `${r.from}->${r.to}`).filter((k) => !rels.has(k))),
+      attributes: new Set(shown.entities.filter((e) => ids.has(e.id))
+        .flatMap((e) => e.attributes.map((a) => `${e.id}.${a.name}`)).filter((k) => !attrs.has(k))),
+    };
+  }, [model, shown]);
+
   const [picked, setSelected] = useState<string | null>(null);
-  const selected = picked && model.entities.some((e) => e.id === picked) ? picked : null; // gone after an import
+  useEffect(() => { if (review) setSelected(null); }, [review]);  // a review shows the whole model
+  const selected = picked && shown.entities.some((e) => e.id === picked) ? picked : null; // gone after an import
   const [analysis, setAnalysis] = useState<ModelAnalysis | null>(null);
-  const positions = useMemo(() => layoutModel(model), [model]);
+  const positions = useMemo(() => layoutModel(shown), [shown]);
 
   useEffect(() => {
     if (!engineReady) return;
@@ -166,15 +215,37 @@ function ModelCanvas({ model, engineReady, dataReady, tab, onTab, onChange, onOp
   const related = useMemo(() => {
     if (!selected) return null;
     const out = new Set([selected]);
-    for (const r of model.relationships ?? []) {
+    for (const r of shown.relationships ?? []) {
       const [a, b] = [r.from.split(".")[0], r.to.split(".")[0]];
       if (a === selected) out.add(b);
       if (b === selected) out.add(a);
     }
     return out;
-  }, [selected, model]);
+  }, [selected, shown]);
 
-  const nodes: EntityNodeType[] = model.entities.map((e) => ({
+  // Drawing a relationship: drag from an attribute to another entity's key (or the other way).
+  const [linking, setLinking] = useState<{ source: string; target: string; check: LinkCheck | null } | null>(null);
+  const onConnect = async (c: Connection) => {
+    if (review || !c.source || !c.target || c.source === c.target) return;
+    const ends = [[c.source, c.sourceHandle?.slice(2)], [c.target, c.targetHandle?.slice(2)]] as [string, string | undefined][];
+    const isKey = ([id, attr]: [string, string | undefined]) => {
+      const e = model.entities.find((x) => x.id === id);
+      return !!e && !!attr && ["dimension", "hub"].includes(e.kind) && entityKey(e).includes(attr);
+    };
+    const parent = isKey(ends[0]) && !isKey(ends[1]) ? ends[0] : isKey(ends[1]) ? ends[1] : null;
+    const child = parent === ends[0] ? ends[1] : ends[0];
+    if (!parent || !child[1]) {
+      setLinking({ source: `${child[0]}.${child[1] ?? "?"}`, target: ends.find((e) => e !== child)![0],
+        check: { note: "drag from an attribute to a dimension's key (or from the key to the attribute)", ok: false } });
+      return;
+    }
+    const link = { source: `${child[0]}.${child[1]}`, target: parent[0] };
+    setLinking({ ...link, check: null });
+    const check = await checkLink(model, link.source, link.target);
+    setLinking((l) => (l && l.source === link.source && l.target === link.target ? { ...l, check } : l));
+  };
+
+  const nodes: EntityNodeType[] = shown.entities.map((e) => ({
     id: e.id,
     type: "entity",
     position: positions[e.id] ?? { x: 0, y: 0 },
@@ -184,18 +255,21 @@ function ModelCanvas({ model, engineReady, dataReady, tab, onTab, onChange, onOp
     draggable: true,
     data: {
       entity: e,
-      fks: new Set((model.relationships ?? []).filter((r) => r.from.startsWith(`${e.id}.`)).map((r) => r.from.split(".")[1])),
+      fks: new Set((shown.relationships ?? []).filter((r) => r.from.startsWith(`${e.id}.`)).map((r) => r.from.split(".")[1])),
       selected: e.id === selected,
-      dimmed: !!related && !related.has(e.id),
+      dimmed: !!related && !related.has(e.id) && !fresh.entities.has(e.id),
+      isNew: fresh.entities.has(e.id),
+      newAttrs: new Set([...fresh.attributes].filter((k) => k.startsWith(`${e.id}.`)).map((k) => k.slice(e.id.length + 1))),
     },
   }));
-  const edges: Edge[] = (model.relationships ?? []).map((r) => {
+  const edges: Edge[] = (shown.relationships ?? []).map((r) => {
     const [src, srcCol] = r.to.split(".");
     const [tgt, tgtCol] = r.from.split(".");
-    const lit = !!selected && (src === selected || tgt === selected);
+    const isNew = fresh.relationships.has(`${r.from}->${r.to}`);
+    const lit = isNew || (!!selected && (src === selected || tgt === selected));
     return {
       id: `${r.from}->${r.to}`, source: src, sourceHandle: `r-${srcCol}`, target: tgt, targetHandle: `l-${tgtCol}`,
-      type: "smoothstep", className: lit ? "rel is-lit" : "rel", animated: lit,
+      type: "smoothstep", className: `rel${lit ? " is-lit" : ""}${isNew ? " is-new" : ""}`, animated: lit,
     };
   });
 
@@ -208,7 +282,9 @@ function ModelCanvas({ model, engineReady, dataReady, tab, onTab, onChange, onOp
           nodeTypes={nodeTypes}
           onNodeClick={(_, n) => { setSelected(n.id); onTab("overview"); }}
           onPaneClick={() => setSelected(null)}
-          nodesConnectable={false}
+          nodesConnectable={!review}
+          onConnect={(c) => void onConnect(c)}
+          connectionMode={ConnectionMode.Loose}
           fitView
           fitViewOptions={{ padding: fitPadding(), maxZoom: 1 }}
           minZoom={0.1}
@@ -217,6 +293,28 @@ function ModelCanvas({ model, engineReady, dataReady, tab, onTab, onChange, onOp
           <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} />
         </ReactFlow>
       </main>
+      {linking && (
+        <div className="link-card glass" role="dialog" aria-label="Link" data-testid="link-card">
+          <div className="mono">{linking.source} <span className="quiet">→</span> {linking.target}</div>
+          {linking.check === null ? <p className="quiet">Checking the data…</p>
+            : "note" in linking.check ? <p className={linking.check.ok ? "quiet" : "warn-text"} data-testid="link-check">{linking.check.note}</p>
+              : <p data-testid="link-check" className={linking.check.found === linking.check.total ? "ok-text" : "warn-text"}>
+                {linking.check.found} of {linking.check.total} {linking.check.total === 1 ? "value" : "values"} found
+                {linking.check.total > linking.check.found && <> ({linking.check.total - linking.check.found} without a match
+                  get the unknown member)</>}
+              </p>}
+          <div className="row end">
+            <button className="btn sm ghost" onClick={() => setLinking(null)}>Cancel</button>
+            <button className="btn sm primary" disabled={!linking.check || ("note" in linking.check && !linking.check.ok)}
+              onClick={async () => {
+                const r = await engine.modelLink(model, linking.source, linking.target);
+                setLinking(null);
+                if (r.ok) onChange(r.model, `Linked ${linking.source} to ${linking.target}`);
+                else onChange(model, `Couldn't link them: ${r.error}`);
+              }}>Link</button>
+          </div>
+        </div>
+      )}
       <div className="zoom glass" role="group" aria-label="Zoom">
         <button className="btn ghost icon" onClick={() => flow.zoomIn({ duration: 150 })} aria-label="Zoom in"><Plus /></button>
         <button className="btn ghost icon" onClick={() => flow.zoomOut({ duration: 150 })} aria-label="Zoom out"><Minus /></button>
@@ -226,8 +324,8 @@ function ModelCanvas({ model, engineReady, dataReady, tab, onTab, onChange, onOp
       </div>
       <aside className="inspector" aria-label="Model">
         <div className="tabs" role="tablist">
-          {([["overview", "Model", Layers], ["load", "Load", Workflow], ["export", "Export", ScrollText], ["yaml", "YAML", FileCode2],
-            ["import", "Import", FileInput]] as const).map(([id, label, Icon]) => (
+          {([["overview", "Model", Layers], ["load", "Load", Workflow], ["export", "Export", ScrollText],
+            ["yaml", "YAML", FileCode2]] as const).map(([id, label, Icon]) => (
             <button key={id} role="tab" aria-selected={tab === id} className={`tab${tab === id ? " is-active" : ""}`}
               onClick={() => onTab(id)}>
               <Icon />{label}
@@ -235,32 +333,143 @@ function ModelCanvas({ model, engineReady, dataReady, tab, onTab, onChange, onOp
           ))}
         </div>
         <div className="panel" role="tabpanel">
-          {tab === "overview" && <Overview model={model} analysis={analysis} engineReady={engineReady} reasons={reasons}
-            selected={model.entities.find((e) => e.id === selected) ?? null} onSelect={setSelected} />}
-          {tab === "overview" && !selected && job && jobMap && <JobMapSection map={jobMap} name={job.spec.name} />}
+          {tab === "overview" && review && (
+            <ReviewSection review={review} ticked={ticked} accepted={accepted} ready={!!preview}
+              onTick={(id, on) => setTicked((old) => {
+                const next = new Set(old);
+                const change = review.ext.changes.find((c) => c.id === id)!;
+                if (on) {
+                  next.add(id);
+                  for (const x of change.excludes) next.delete(x);
+                  // what comes with it: the references of an entity you take
+                  for (const c of review.ext.changes) if (c.needs.includes(id) && c.needs.every((n) => next.has(n))) next.add(c.id);
+                } else next.delete(id);
+                return next;
+              })}
+              onAccept={() => onReviewed(preview, review.ext.changes.filter((c) => accepted.has(c.id)))}
+              onDiscard={() => onReviewed(null, [])} />
+          )}
+          {tab === "overview" && <Overview model={shown} analysis={review ? null : analysis} engineReady={engineReady} reasons={reasons}
+            selected={shown.entities.find((e) => e.id === selected) ?? null} onSelect={setSelected} reviewing={!!review} />}
+          {tab === "overview" && !selected && !review && <GrowSection {...props} />}
+          {tab === "overview" && !selected && !review && job && jobMap && <JobMapSection map={jobMap} name={job.spec.name} />}
           {tab === "load" && <LoadPanel model={model} valid={analysis?.valid ?? false} engineReady={engineReady}
             onOpen={onOpenPipeline} />}
           {tab === "export" && <ExportPanel model={model} valid={analysis?.valid ?? false} engineReady={engineReady} />}
           {tab === "yaml" && <YamlPanel model={model} onChange={onChange} />}
-          {tab === "import" && (
-            <>
-              <ProposePanel ready={engineReady && dataReady} onPropose={(m, why) => {
-                onClearJob?.(); setReasons(why); setSelected(null); onChange(m, `Proposed ${m.entities.length} entities; click one to see why`);
-                onTab("overview");
-              }} />
-              <ImportPanel engineReady={engineReady} onChange={(m, note) => { onClearJob?.(); setReasons({}); onChange(m, note); }} />
-            </>
-          )}
         </div>
       </aside>
     </>
   );
 }
 
-function Overview({ model, analysis, engineReady, reasons, selected, onSelect }: {
+/** What new tables would add: each change with why, ticked unless it's an alternative. */
+function ReviewSection({ review, ticked, accepted, ready, onTick, onAccept, onDiscard }: {
+  review: { ext: ModelExtension; tables: string[] }; ticked: Set<string>; accepted: Set<string>; ready: boolean;
+  onTick: (id: string, on: boolean) => void; onAccept: () => void; onDiscard: () => void;
+}) {
+  const { changes, notes } = review.ext;
+  const icon = { entity: Plus, relationship: Link2, append: Rows3 } as const;
+  return (
+    <section className="review" data-testid="model-review">
+      <h3>Adding {review.tables.length === 1 ? <span className="mono">{review.tables[0]}</span> : `${review.tables.length} tables`}</h3>
+      {changes.length === 0 ? <p className="quiet">Nothing to add: {review.tables.length === 1 ? "it brings" : "they bring"} no
+        new tables or references the model doesn't have.</p> : (
+        <>
+          <p className="quiet">The model keeps everything it has; these are only additions. The canvas shows the
+            result, new parts marked. Untick what you don't want.</p>
+          <ul className="change-list">
+            {changes.filter((c) => c.needs.every((n) => ticked.has(n))).map((c) => {
+              const Icon = icon[c.kind];
+              const blocked = ticked.has(c.id) && !accepted.has(c.id);
+              return (
+                <li key={c.id} className={`${accepted.has(c.id) ? "is-on" : ""}${blocked ? " is-blocked" : ""}`} data-testid={`change-${c.id}`}>
+                  <label>
+                    <input type="checkbox" checked={ticked.has(c.id)} onChange={(e) => onTick(c.id, e.target.checked)} />
+                    <Icon aria-hidden="true" />
+                    <span className="mono">{c.label}</span>
+                  </label>
+                  {c.why.length > 0 && <div className="quiet why">{c.why.join("; ")}</div>}
+                  {blocked && <div className="quiet why">needs {c.needs.join(", ").replace(/entity:/g, "")}</div>}
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+      {notes.length > 0 && <ul className="issue-list warn">{notes.map((n) => <li key={n}><CircleAlert />{n}</li>)}</ul>}
+      <div className="row end">
+        <button className="btn sm ghost" onClick={onDiscard}>Discard</button>
+        <button className="btn sm primary" disabled={!ready || accepted.size === 0} onClick={onAccept} data-testid="review-accept">
+          <Check />Add {accepted.size} {accepted.size === 1 ? "change" : "changes"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/** Tables the model doesn't load yet, to add; and a fresh start. */
+function GrowSection({ model, tables, onGrow, onAddFiles, onNewModel, dataReady, engineReady }: Props) {
+  const inModel = useMemo(() => tablesInModel(model, tables), [model, tables]);
+  const rest = tables.filter((t) => !inModel.has(t.name));
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  return (
+    <section data-testid="model-grow">
+      <h3>Grow the model</h3>
+      <p className="quiet">Add tables and Redcliff proposes only what they add: new entities, and references to and
+        from the ones you have. Nothing you changed is touched. You can also drag from an attribute to a dimension's key
+        to link them.</p>
+      {rest.length === 0 ? <p className="quiet">Every table here is in the model. Add a CSV to grow it.</p> : (
+        <TablePicker tables={rest} picked={picked} onPick={setPicked} />
+      )}
+      <div className="row between">
+        <label className={`btn sm ghost${dataReady ? "" : " is-disabled"}`}>
+          <FileSpreadsheet />Add CSV
+          <input type="file" accept=".csv" multiple hidden disabled={!dataReady}
+            onChange={(e) => { if (e.target.files?.length) onAddFiles(e.target.files); e.target.value = ""; }} />
+        </label>
+        <button className="btn sm primary" disabled={!picked.size || !dataReady || !engineReady}
+          onClick={() => { onGrow([...picked]); setPicked(new Set()); }} data-testid="grow-model">
+          Add {picked.size || ""} {picked.size === 1 ? "table" : "tables"} to the model
+        </button>
+      </div>
+      <div className="row end new-model">
+        <button className="btn sm ghost" onClick={onNewModel}>New model</button>
+      </div>
+    </section>
+  );
+}
+
+/** Tables to tick: yours first (marked), then the samples, with their columns. */
+export function TablePicker({ tables, picked, onPick, disabled }: {
+  tables: TableInfo[]; picked: Set<string>; onPick: (next: Set<string>) => void; disabled?: Set<string>;
+}) {
+  return (
+    <ul className="pick-list" data-testid="table-picker">
+      {tables.map((t) => (
+        <li key={t.name}>
+          <label title={Object.entries(t.columns).map(([c, ty]) => `${c} ${ty.toLowerCase()}`).join(", ")}>
+            <input type="checkbox" checked={picked.has(t.name)} disabled={disabled?.has(t.name)} onChange={(e) => {
+              const next = new Set(picked);
+              if (e.target.checked) next.add(t.name); else next.delete(t.name);
+              onPick(next);
+            }} />
+            <span className="mono">{t.name}</span>
+            {!t.sample && <span className="chip tiny">yours</span>}
+            <span className="quiet">{Object.keys(t.columns).length} columns</span>
+            {disabled?.has(t.name) && <span className="quiet">in the model</span>}
+          </label>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function Overview({ model, analysis, engineReady, reasons, selected, onSelect, reviewing }: {
   model: DataModel; analysis: ModelAnalysis | null; engineReady: boolean; reasons: Record<string, string[]>;
   selected: ModelEntity | null;
   onSelect: (id: string | null) => void;
+  reviewing?: boolean;
 }) {
   const counts = model.entities.reduce<Record<string, number>>((acc, e) => ({ ...acc, [e.kind]: (acc[e.kind] ?? 0) + 1 }), {});
   return (
@@ -272,6 +481,8 @@ function Overview({ model, analysis, engineReady, reasons, selected, onSelect }:
             {KIND[selected.kind]?.label ?? selected.kind}
             {selected.kind === "dimension" && ` · ${isScd2(selected) ? "SCD2: keeps every version" : "SCD1: current values only"}`}
           </p>
+          {selected.source && <p className="quiet" data-testid="entity-source">Loads from <span className="mono">{selected.source}</span>
+            {(selected.append ?? []).map((f) => <span key={f}> + <span className="mono">{f}</span></span>)}</p>}
           {selected.grain && <p><strong>Grain:</strong> {selected.grain}</p>}
           {selected.description && <p>{selected.description}</p>}
           {reasons[selected.id] && (
@@ -305,10 +516,11 @@ function Overview({ model, analysis, engineReady, reasons, selected, onSelect }:
             {" "}· {(model.relationships ?? []).length} relationships
           </p>
           {model.description && <p>{model.description}</p>}
-          <p className="quiet">Click an entity for its attributes. Edit the model in the YAML tab, or import DDL or DBML.</p>
+          {!reviewing && <p className="quiet">Click an entity for its attributes and why it is what it is. Edit the model in
+            the YAML tab.</p>}
         </section>
       )}
-      <section>
+      {!reviewing && <section>
         <h3>Checks</h3>
         {!engineReady || !analysis ? <p className="quiet">Checking once the engine has started…</p>
           : analysis.valid ? <p className="ok-line" data-testid="model-valid"><CircleCheck />The model is valid</p>
@@ -319,7 +531,7 @@ function Overview({ model, analysis, engineReady, reasons, selected, onSelect }:
                 ))}
               </ul>
             )}
-      </section>
+      </section>}
       {(model.relationships ?? []).length > 0 && (
         <section>
           <h3>Relationships</h3>
@@ -478,7 +690,7 @@ CREATE TABLE fct_sales (
   revenue DECIMAL(12, 2)
 );`;
 
-function ImportPanel({ engineReady, onChange }: { engineReady: boolean; onChange: (m: DataModel, note?: string) => void }) {
+export function ImportPanel({ engineReady, onChange }: { engineReady: boolean; onChange: (m: DataModel, note?: string) => void }) {
   const [text, setText] = useState(SAMPLE_DDL);
   const [dialect, setDialect] = useState("");
   const [name, setName] = useState("imported");
@@ -522,83 +734,6 @@ function ImportPanel({ engineReady, onChange }: { engineReady: boolean; onChange
   );
 }
 
-function ProposePanel({ ready, onPropose }: { ready: boolean; onPropose: (m: DataModel, reasons: Record<string, string[]>) => void }) {
-  const [tables, setTables] = useState<Record<string, Record<string, string>>>({});
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const refresh = async () => {
-    const t = await data.schema();
-    setTables(t);
-    setPicked((old) => (old.size ? new Set([...old].filter((n) => n in t)) : new Set(Object.keys(t).filter((n) => ["orders", "customers"].includes(n)))));
-  };
-  useEffect(() => { if (ready) void refresh(); }, [ready]);
-  const propose = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const chosen = Object.fromEntries(Object.entries(tables).filter(([n]) => picked.has(n)));
-      const q = await engine.modelProfileQueries(chosen);
-      if (!q.ok) throw new Error(q.error);
-      const rows: Record<string, unknown[]> = {};
-      for (const [t, sql] of Object.entries(q.queries)) rows[t] = (await data.query(sql, 1)).rows[0].map((v) => Number(v));
-      const refs = await engine.modelReferenceQueries(chosen, rows);
-      if (!refs.ok) throw new Error(refs.error);
-      const held: string[][] = [];
-      for (const c of refs.checks) if ((await data.query(c.sql, 1)).rows[0][0] == 0) held.push(c.ref);
-      const r = await engine.modelPropose(chosen, rows, held, "proposed");
-      if (!r.ok) throw new Error(r.error);
-      onPropose(r.model, r.reasons);
-    } catch (e) {
-      setError(String((e as Error).message ?? e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <section>
-      <h3>From your data</h3>
-      <p className="quiet">Redcliff profiles the tables (keys, nulls, references between them) and proposes a
-        Kimball model, with the reason for each choice. Add your own CSVs to the list.</p>
-      {!ready ? <p className="quiet">Available once the engine and DuckDB have started.</p> : (
-        <>
-          <ul className="pick-list">
-            {Object.entries(tables).map(([t, cols]) => (
-              <li key={t}>
-                <label>
-                  <input type="checkbox" checked={picked.has(t)} onChange={(e) => {
-                    const next = new Set(picked);
-                    if (e.target.checked) next.add(t); else next.delete(t);
-                    setPicked(next);
-                  }} />
-                  <span className="mono">{t}</span> <span className="quiet">{Object.keys(cols).length} columns</span>
-                </label>
-              </li>
-            ))}
-          </ul>
-          <div className="row between">
-            <label className="btn sm ghost">
-              Add CSV
-              <input type="file" accept=".csv" multiple hidden onChange={async (e) => {
-                for (const f of Array.from(e.target.files ?? [])) {
-                  const { table } = await data.addCsv(f.name, await f.text());
-                  setPicked((old) => new Set([...old, table]));
-                }
-                await refresh();
-              }} />
-            </label>
-            <button className="btn sm primary" disabled={busy || !picked.size} onClick={propose}>
-              {busy ? "Profiling…" : `Propose a model from ${picked.size} ${picked.size === 1 ? "table" : "tables"}`}
-            </button>
-          </div>
-          {error && <p className="error">{error}</p>}
-        </>
-      )}
-      <h3 style={{ marginTop: 22 }}>From DDL or DBML</h3>
-    </section>
-  );
-}
-
 function LoadPanel({ model, valid, engineReady, onOpen }: {
   model: DataModel; valid: boolean; engineReady: boolean; onOpen: (spec: Spec) => void;
 }) {
@@ -607,7 +742,7 @@ function LoadPanel({ model, valid, engineReady, onOpen }: {
   useEffect(() => {
     if (!engineReady) return;
     let live = true;
-    engine.modelLoadPipeline(model).then((r) => {
+    csvHeaders().then((headers) => engine.modelLoadPipeline(model, headers)).then((r) => {
       if (!live) return;
       setResult(r.ok ? { spec: r.spec, targets: r.targets } : null);
       setError(r.ok ? null : r.issues?.length ? r.issues.join("; ") : r.error);

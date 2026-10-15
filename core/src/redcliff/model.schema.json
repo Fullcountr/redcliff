@@ -108,6 +108,12 @@
           "minLength": 1,
           "pattern": "^[^\\n\\r]+$",
           "description": "Where the entity's rows come from: a CSV or Parquet path (relative to the model file) or a table."
+        },
+        "append": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1, "pattern": "^[^\\n\\r]+$"},
+          "description": "More files or tables with the same columns as 'source' (a month per file, say), loaded together with it."
         }
       },
       "if": {

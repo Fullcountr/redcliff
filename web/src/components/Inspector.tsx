@@ -1,6 +1,6 @@
 import * as yaml from "js-yaml";
 import {
-  ArrowRight, Boxes, Check, CircleAlert, Code2, Copy, Download, FileText, Gauge, GitCompare, Keyboard, MousePointerClick,
+  ArrowRight, Boxes, Check, CircleAlert, Code2, Copy, Download, FileText, Gauge, GitCompare, Keyboard, Layers, MousePointerClick,
   Rows3, SlidersHorizontal, Table2, Trash2, TriangleAlert, Unlink, Waypoints, X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -37,6 +37,9 @@ type Props = {
   baseline: Spec | null;
   onRebase: () => void;
   onModelFromJob: (style: "kimball" | "data_vault") => void;
+  /** The table a CSV source reads, and modelling it (Model mode). */
+  tableOf: (step: Step | null) => string | null;
+  onModelTable: (table: string) => void;
 };
 
 const ADDABLE: StepType[] = ["filter", "derive", "select", "aggregate", "join", "union", "sql", "target"];
@@ -186,6 +189,15 @@ function StepPanel(props: Props) {
           </div>
         )}
       </section>
+      {props.tableOf(selected) && (
+        <section className="model-this" data-testid="model-this">
+          <div className="row between">
+            <span className="quiet">Reads the table <span className="mono">{props.tableOf(selected)}</span>.</span>
+            <button className="btn sm" onClick={() => props.onModelTable(props.tableOf(selected)!)}>
+              <Layers />Model this data</button>
+          </div>
+        </section>
+      )}
       <StepEditor
         key={selected.id + JSON.stringify(selected.params)}
         step={selected}

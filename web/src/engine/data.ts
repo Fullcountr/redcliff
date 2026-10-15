@@ -14,4 +14,6 @@ export const data = {
   query: async (sql: string, limit?: number) => (await load()).query(sql, limit),
   addCsv: async (fileName: string, text: string) => (await load()).addCsv(fileName, text),
   schema: async () => Object.fromEntries((await load()).tables.entries()),
+  /** Each table's file name and whether it came with the playground. */
+  files: async () => Object.fromEntries((await load()).files.entries()),
 };

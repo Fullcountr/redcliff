@@ -58,11 +58,20 @@ def _csv_header(path: Path) -> list[str] | None:
     return names if names and all(ID_PATTERN.match(n) for n in names) and len(set(names)) == len(names) else None
 
 
-def _source_node(e: Entity, model_dir: Path, spec_dir: Path) -> dict:
-    """The source step for an entity. CSV columns are declared from the file's header (typed like the
-    attributes they map to, else varchar; the
+def _source_nodes(e: Entity, model_dir: Path, spec_dir: Path) -> list[dict]:
+    """The steps that read an entity's rows, ending in ``src_<entity>``: its source, and with
+    ``append`` a source per further file and a union of them all."""
+    if not e.append:
+        return [_source_node(e, e.source, f"src_{e.id}", model_dir, spec_dir)]
+    parts = [_source_node(e, src, f"src_{e.id}_{i + 1}", model_dir, spec_dir)
+             for i, src in enumerate([e.source, *e.append])]
+    return [*parts, {"id": f"src_{e.id}", "type": "union", "inputs": [p["id"] for p in parts], "params": {}}]
+
+
+def _source_node(e: Entity, src: str, node_id: str, model_dir: Path, spec_dir: Path) -> dict:
+    """The source step for one of an entity's files or tables. CSV columns are declared from the file's
+    header (typed like the attributes they map to, else varchar; the
     staging step casts them), so lineage runs from the file's columns to the model's attributes."""
-    src = e.source
     suffix = Path(src).suffix.lower()
     if suffix in (".csv", ".parquet"):
         params: dict[str, Any] = {"format": suffix[1:], "path": _rel(src, model_dir, spec_dir)}
@@ -71,7 +80,7 @@ def _source_node(e: Entity, model_dir: Path, spec_dir: Path) -> dict:
             params["columns"] = {c: _raw_type(e, c) for c in header}
     else:
         params = {"format": "table", "table": src}
-    return {"id": f"src_{e.id}", "type": "source", "params": params}
+    return {"id": node_id, "type": "source", "params": params}
 
 
 def _raw_type(e: Entity, column: str) -> str:
@@ -175,7 +184,7 @@ def _kimball_nodes(model: Model, model_dir: Path, spec_dir: Path) -> list[dict]:
         sk = _generated_sk(e)
         bks = _business_keys(e)
         if e.source:
-            nodes.append(_source_node(e, model_dir, spec_dir))
+            nodes += _source_nodes(e, model_dir, spec_dir)
             nodes.append(_staging(e, {sk} if sk else set()))
         else:
             nodes += _date_dimension(model, e, model_dir, spec_dir)
@@ -197,7 +206,7 @@ def _kimball_nodes(model: Model, model_dir: Path, spec_dir: Path) -> list[dict]:
     for e in others:
         if not e.source:
             raise GenerateError(f"{e.id} needs a 'source' to load from")
-        nodes.append(_source_node(e, model_dir, spec_dir))
+        nodes += _source_nodes(e, model_dir, spec_dir)
         lookups = []  # (attribute, dimension entity, lookup expression)
         for a in e.attributes:
             r = next((r for r in rels if r.source == f"{e.id}.{a.name}"), None)
@@ -284,7 +293,7 @@ def _date_dimension(model: Model, e: Entity, model_dir: Path, spec_dir: Path) ->
     sources = []
     for fid in inputs:
         fact = model.entity(fid[4:])
-        sources.append(_source_node(fact, model_dir, spec_dir))
+        sources += _source_nodes(fact, model_dir, spec_dir)
     branches = []
     for d, src, column in selects:
         cols = []
@@ -319,7 +328,7 @@ def _vault_nodes(model: Model, model_dir: Path, spec_dir: Path) -> list[dict]:
             raise GenerateError(f"{e.id}: a Data Vault model has hubs, links and satellites, not {e.kind}s")
         if not e.source:
             raise GenerateError(f"{e.id} needs a 'source' to load from")
-        nodes.append(_source_node(e, model_dir, spec_dir))
+        nodes += _source_nodes(e, model_dir, spec_dir)
         hk = next((a for a in e.attributes if a.role == "surrogate_key"), None)
         if hk is None:
             raise GenerateError(f"{e.id}: mark its hash key (role: surrogate_key)")

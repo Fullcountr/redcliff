@@ -66,24 +66,44 @@ export async function count(sql: string): Promise<number> {
   return Number(rows[0][0]);
 }
 
-/** Make a CSV available both as a file (for csv sources) and as a table (for table sources). */
-export async function addCsv(fileName: string, text: string): Promise<{ table: string; columns: Record<string, string> }> {
+/** Each table's file, and whether it came with the playground or from the person. */
+export const files = new Map<string, { file: string; original: string; sample: boolean }>();
+
+/** The table a file name becomes: lower case, letters, digits and underscores. */
+export function tableName(fileName: string): string {
+  return fileName.replace(/\.[^.]+$/, "").toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/^(\d)/, "_$1");
+}
+
+/** Make a CSV available both as a file (for csv sources) and as a table (for table sources). The
+ * same file name again replaces its table (a new version of your file); a file that would take a
+ * sample's or another file's table gets a fresh one (orders_2), so nothing is overwritten by accident.
+ * Returns the table, the file name pipelines read it by, and what happened. */
+export async function addCsv(fileName: string, text: string, sample = false):
+  Promise<{ table: string; file: string; columns: Record<string, string>; replaced: boolean; renamed: boolean }> {
   await startDuck();
-  await db!.registerFileText(fileName, text);
-  const table = fileName.replace(/\.[^.]+$/, "").toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/^(\d)/, "_$1");
-  await conn!.query(`CREATE OR REPLACE TABLE ${table} AS SELECT * FROM read_csv('${fileName.replace(/'/g, "''")}', header = true)`);
+  const base = tableName(fileName);
+  const mine = (t: string) => files.get(t)!.original === fileName && files.get(t)!.sample === sample;
+  let table = base;
+  for (let i = 2; files.has(table) && !mine(table); i++) table = `${base}_${i}`;
+  const replaced = files.has(table);
+  // A sample keeps its file name; yours is read as <table>.csv when the name is taken.
+  const taken = [...files.entries()].some(([t, f]) => t !== table && f.file === fileName);
+  const file = replaced ? files.get(table)!.file : taken ? `${table}.csv` : fileName;
+  await db!.registerFileText(file, text);
+  await conn!.query(`CREATE OR REPLACE TABLE ${table} AS SELECT * FROM read_csv('${file.replace(/'/g, "''")}', header = true)`);
   const described = await query(`DESCRIBE ${table}`);
   const columns: Record<string, string> = {};
   for (const row of described.rows) columns[String(row[0]).toLowerCase()] = String(row[1]);
   tables.set(table, columns);
-  return { table, columns };
+  files.set(table, { file, original: fileName, sample });
+  return { table, file, columns, replaced, renamed: table !== base };
 }
 
 export async function loadSamples(base: string, files: string[]): Promise<void> {
   await Promise.all(
     files.map(async (f) => {
       const text = await (await fetch(`${base}samples/${f}`)).text();
-      await addCsv(f, text);
+      await addCsv(f, text, true);
     }),
   );
 }

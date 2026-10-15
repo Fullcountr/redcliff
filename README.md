@@ -362,13 +362,17 @@ relationships:
 | You have | Redcliff gives you |
 | --- | --- |
 | CSV or Parquet files | `redcliff model propose a.csv b.csv`: keys, references and measures found by profiling, with the reason for each |
+| more files, later | `redcliff model extend model.yaml c.csv`: only what they add (new entities, references both ways, a month's file appended to its table), each change listed; nothing you edited is touched |
 | a legacy job | `redcliff model propose job.xml`: keys and measures from what the job joins, looks up, merges and sums; `redcliff model map` shows how much of the job a model covers |
 | SQL DDL or DBML | `redcliff model import tables.sql` |
 | a model | `redcliff model pipeline` generates its load (SCD2 dimensions, point-in-time facts, Data Vault hubs, links and satellites with MD5 hash keys); `redcliff model export` writes DDL for eight dialects, DBML, Mermaid or dbt tests; `redcliff model test` checks the loaded tables |
 
-In the playground, **Examples → Data models** opens the model view: entities as cards, keys and
-history marked, relationships drawn key to key, with Load, Export, YAML and Import tabs. After
-importing a legacy job, **Model it** on its Migration tab proposes a model from it.
+In the playground, the model is a mode of its own: **Pipeline | Model** in the top bar, over the same
+tables. Start a model from your tables, from the open pipeline, from DDL or DBML, or from an example;
+then add tables as they come. A file you add shows what it brings before anything changes (new
+entities, references, rows for a table you have), and a relationship can be drawn by dragging from an
+attribute to a dimension's key, checked against the data first. After importing a legacy job,
+**Model it** on its Migration tab proposes a model from it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/data-model-dark.png">
@@ -376,6 +380,13 @@ importing a legacy job, **Model it** on its Migration tab proposes a model from 
 </picture>
 
 <p align="center"><sub>A Kimball model: each card is an entity with its keys (PK, SK, BK, FK, DK), measures (Σ) and history (SCD1, SCD2).</sub></p>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/model-grow-dark.png">
+  <img src="docs/images/model-grow-light.png" alt="Two CSVs added to the sales model: the panel lists what they add, each with its reason (orders_october.csv loads into fct_orders with orders.csv; a new dim_status dimension; fct_orders.status_key looked up in it; a separate fct_orders_october entity, unticked), and the canvas draws dim_status marked new with its dashed relationship to fct_orders.">
+</picture>
+
+<p align="center"><sub>Growing it: a statuses file and a month of orders, added. Nothing changes until you accept what they bring.</sub></p>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/model-from-job-dark.png">
@@ -525,7 +536,7 @@ of guessing. See [`docs/datastage.md`](docs/datastage.md).
 | `redcliff test pipeline.yaml [--node ID]` | run the data quality expectations ([details](docs/spec.md#expectations)) |
 | `redcliff trace pipeline.yaml STEP [--where COND]` | row-level trace: each row of a step with the source rows behind it |
 | `redcliff diff old.yaml new.yaml [--data]` or `redcliff diff --git REF` | what a change does: steps, columns, lineage and rows ([details](docs/pr-bot.md)) |
-| `redcliff model propose\|map\|pipeline\|test\|export\|import ...` | data models: propose one from data files or a legacy job, map a job onto one, generate and check its load ([details](docs/modeling.md#commands-m1)) |
+| `redcliff model propose\|extend\|map\|pipeline\|test\|export\|import ...` | data models: propose one from data files or a legacy job, grow one with more files, map a job onto one, generate and check its load ([details](docs/modeling.md#commands-m1)) |
 | `redcliff bridge` | JSON lines over stdio for editor extensions; the [VS Code extension](docs/vscode.md) runs it |
 | `redcliff mcp --root .` | an MCP server, so AI agents can read and edit pipelines, with a diff you accept first ([details](docs/mcp.md)) |
 
@@ -573,7 +584,7 @@ flowchart LR
 | Row trace | tracing never changes a step's rows; every traced target row is rebuilt from only its source rows |
 | Diff | step, column, lineage and row changes for edited examples, worked out by hand; `--git` mode on a scratch repository |
 | MCP | the protocol over real stdio, every tool, and edits: proposed without writing, applied once, refused when stale or broken, untouched steps kept byte for byte |
-| Data models | every model rule, DDL and DBML round trips; proposals from files and from each legacy format; generated Kimball and Data Vault loads run twice in DuckDB and keep history as worked out by hand (SCD2 versions, point-in-time lookups, unknown members), build with dbt and pass the model's own checks |
+| Data models | every model rule, DDL and DBML round trips; proposals from files and from each legacy format; generated Kimball and Data Vault loads run twice in DuckDB and keep history as worked out by hand (SCD2 versions, point-in-time lookups, unknown members), build with dbt and pass the model's own checks; a model grown with new files keeps every hand edit, and its load (new lookups, appended months) returns the rows worked out by hand |
 | Importer | the original SQL and the imported, recompiled pipeline must return identical rows |
 | PowerCenter | the sample mapping runs in DuckDB and must match rows worked out by hand; the same job rebuilt with a mapplet, session, workflow and parameter file must return identical rows; a store mart with a Normalizer, two Ranks (a tie, a NULL) and a worklet matches rows worked out by hand; every transformation type and scorecard status has a test |
 | Expressions | each Informatica, SSIS, Talend (Java) and DataStage expression runs in DuckDB and must return the original tool's answer |
@@ -584,7 +595,7 @@ flowchart LR
 | Spark | generated Spark SQL and PySpark run on real Spark and must match DuckDB, row for row; Informatica expressions too |
 | dbt | every example becomes a dbt project, `dbt build` runs it with dbt-duckdb (seeds, hooks, file targets) and every target must match DuckDB |
 | Lakeflow | every example becomes a Lakeflow Declarative Pipeline, `spark-pipelines run` runs it on local Spark and every materialized view must match DuckDB |
-| Browser | headless Chromium drives the real app: boot, hover, blast radius, SQL, PowerCenter, SSIS, Talend and DataStage import, scorecard, preview, edit, the Changes tab, share, data models, phone layout; after every deploy it runs again against the live site |
+| Browser | headless Chromium drives the real app: boot, hover, blast radius, SQL, PowerCenter, SSIS, Talend and DataStage import, scorecard, preview, edit, the Changes tab, share, data models (proposed, grown by adding files, linked by dragging), phone layout; after every deploy it runs again against the live site |
 | VS Code | the webview in Chromium against a real `redcliff bridge`, and the extension in a real VS Code: the panel opens, problems appear on the right step and clear when fixed |
 
 CI runs all of it on every push, including the browser test and a real Spark: the generated

@@ -265,22 +265,85 @@ def _profiles(tables: Any, rows: Any, files: Any):
 
 
 @_wrap
-def model_reference_queries(tables: Any, rows: Any, files: Any = None) -> dict[str, Any]:
-    """The foreign keys worth testing, each with the SQL that counts its missing values."""
+def model_reference_queries(tables: Any, rows: Any, files: Any = None, only: Any = None) -> dict[str, Any]:
+    """The foreign keys worth testing, each with the SQL that counts its missing values (with
+    ``only``, a list of tables, just the ones that touch them)."""
     from redcliff.propose import candidate_references, inclusion_query
 
-    refs = candidate_references(_profiles(tables, rows, files))
+    only = json.loads(only) if isinstance(only, str) else only
+    refs = [r for r in candidate_references(_profiles(tables, rows, files))
+            if not only or r[0] in only or r[2] in only]
     return {"checks": [{"ref": list(r), "sql": inclusion_query(f'"{r[0]}"', r[1], f'"{r[2]}"', r[3])} for r in refs]}
 
 
 @_wrap
-def model_propose(tables: Any, rows: Any, held: Any, name: str = "proposed", files: Any = None) -> dict[str, Any]:
-    """A Kimball model from the profiles and the foreign keys that held, with the reason for each choice."""
-    from redcliff.propose import propose_model
+def model_propose(tables: Any, rows: Any, held: Any, name: str = "proposed", files: Any = None,
+                  style: str = "kimball") -> dict[str, Any]:
+    """A Kimball (or Data Vault) model from the profiles and the foreign keys that held, with the
+    reason for each choice."""
+    from redcliff.propose import propose_model, to_data_vault
 
     held = json.loads(held) if isinstance(held, str) else held
     proposal = propose_model(_profiles(tables, rows, files), [tuple(r) for r in held], name=name)
+    if style == "data_vault":
+        proposal = to_data_vault(proposal)
     return proposal.to_dict()
+
+
+@_wrap
+def model_extend(model: Any, tables: Any, rows: Any, held: Any, new: Any, files: Any = None) -> dict[str, Any]:
+    """What new tables add to a model, as changes to accept or skip: new entities, references the
+    data shows (both ways), and files that read as more rows of a table the model loads."""
+    from redcliff.extend import extend_model
+
+    held = json.loads(held) if isinstance(held, str) else held
+    new = json.loads(new) if isinstance(new, str) else new
+    return extend_model(_model(model), _profiles(tables, rows, files), new, [tuple(r) for r in held],
+                        json.loads(files) if isinstance(files, str) else (files or {})).to_dict()
+
+
+@_wrap
+def model_apply(model: Any, changes: Any, accepted: Any) -> dict[str, Any]:
+    """The model with the accepted changes from :func:`model_extend`."""
+    from redcliff.extend import Change, apply_changes
+
+    changes = json.loads(changes) if isinstance(changes, str) else changes
+    accepted = json.loads(accepted) if isinstance(accepted, str) else accepted
+    return {"model": apply_changes(_model(model), [Change.from_dict(c) for c in changes], accepted).to_dict()}
+
+
+@_wrap
+def model_link(model: Any, source: str, target: str) -> dict[str, Any]:
+    """The model with a relationship drawn by hand from an attribute to an entity's key."""
+    from redcliff.extend import link
+
+    m, done = link(_model(model), source, target)
+    return {"model": m.to_dict(), "done": done}
+
+
+@_wrap
+def model_link_check(model: Any, source: str, target: str, tables: Any) -> dict[str, Any]:
+    """SQL that counts how many of the source column's values the target's business key has, over
+    the browser's tables (``tables`` maps an entity source to its table name)."""
+    from redcliff.extend import _same_source, link, link_check_query
+
+    m = _model(model)
+    link(m, source, target)  # raises if it can't be linked, before any query
+    tables = json.loads(tables) if isinstance(tables, str) else tables
+    src_e, src_a = source.split(".", 1)
+    child, parent = m.entity(src_e), m.entity(target.split(".", 1)[0])
+    if child is None or parent is None or child.attribute(src_a) is None:
+        raise ValueError(f"{source} -> {target}: no such entity or attribute")
+    table_of = lambda e: next((t for s, t in tables.items() if _same_source(s, e.source)), None)  # noqa: E731
+    attr = child.attribute(src_a)
+    bk = next((a for a in parent.attributes if a.role == "business_key"), None) or \
+        next((parent.attribute(k) for k in parent.key()), None)
+    if not (table_of(child) and table_of(parent) and bk is not None) or (attr.source and not
+                                                                         attr.source.isidentifier()) \
+            or (bk.source and not bk.source.isidentifier()):
+        return {"sql": None, "reason": "can't check it against the data: the tables aren't loaded here"}
+    return {"sql": link_check_query(f'"{table_of(child)}"', attr.source or attr.name,
+                                    f'"{table_of(parent)}"', bk.source or bk.name)}
 
 
 @_wrap
@@ -306,12 +369,32 @@ def model_map(model: Any, spec: Any) -> dict[str, Any]:
 
 
 @_wrap
-def model_load_pipeline(model: Any) -> dict[str, Any]:
+def model_load_pipeline(model: Any, headers: Any = None) -> dict[str, Any]:
     """The pipeline that loads a model (Kimball: SCD2 dimensions and point-in-time facts; Data Vault:
-    hubs, links, satellites and current-state marts)."""
+    hubs, links, satellites and current-state marts). ``headers`` maps the browser's CSV files to
+    their column names, so the load's sources declare them (and lineage runs through) as the CLI's do."""
+    import tempfile
+    from pathlib import Path
+
     from redcliff.generate import model_pipeline
 
-    pipeline = model_pipeline(_model(model))
+    headers = json.loads(headers) if isinstance(headers, str) else (headers or {})
+    m = _model(model)
+    # The browser has each CSV under its file name: read a model's data/orders.csv as orders.csv.
+    by_name = {Path(f).name: f for f in headers}
+    here = lambda src: src if src in headers or Path(src).name not in by_name else by_name[Path(src).name]  # noqa: E731
+    for e in m.entities:
+        if e.source:
+            e.source = here(e.source)
+        e.append = [here(a) for a in e.append or []]
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, columns in headers.items():
+            path = Path(tmp, name)
+            if ".." in Path(name).parts or Path(name).is_absolute():
+                continue
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(",".join(columns) + "\n", encoding="utf-8")
+        pipeline = model_pipeline(m, tmp)
     return {"spec": pipeline.to_dict(), "targets": [n.id for n in pipeline.nodes if n.type == "target"]}
 
 
