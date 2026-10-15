@@ -400,11 +400,11 @@ await step("works on a phone-sized screen and in dark mode", async () => {
 
 await step("a network that blocks the engine download says so", async () => {
   const blocked = await browser.newContext();
-  await blocked.route(/engine\/redcliff\.bin$/, (route) => route.fulfill({ status: 403, body: "Blocked by policy" }));
+  await blocked.route(/engine\/redcliff\.js$/, (route) => route.fulfill({ status: 403, body: "Blocked by policy" }));
   const p = await blocked.newPage();
   await p.goto(url);
   await p.waitForSelector('[data-testid="engine-error"]', { timeout: 60000 });
-  assert.match(await p.locator(".boot-card").innerText(), /network refused engine\/redcliff\.bin \(HTTP 403\)[\s\S]*firewall or proxy/);
+  assert.match(await p.locator(".boot-card").innerText(), /network refused engine\/redcliff\.js \(HTTP 403\)[\s\S]*firewall or proxy/);
   if (shots) await p.screenshot({ path: `${shots}/10-engine-blocked.png` });
   await blocked.close();
 });

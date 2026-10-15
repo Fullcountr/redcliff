@@ -552,9 +552,10 @@ flowchart LR
   engine read it. Generated code is never parsed back.
 - **Pure Python core.** `core/` depends only on [sqlglot](https://github.com/tobymao/sqlglot), so
   the same engine runs in the CLI and, through [Pyodide](https://pyodide.org/), in the browser.
-- **Nothing from a CDN.** The web build vendors Pyodide, the sqlglot wheel, the engine and
+- **Nothing from a CDN.** The web build vendors Pyodide, sqlglot, the engine and
   [DuckDB-Wasm](https://duckdb.org/docs/api/wasm/overview), so the app works offline and on
-  any static host.
+  any static host. The Python ships as JavaScript modules of source text, not archives, so
+  work laptops whose web filters refuse unknown archives can still run it.
 - **Interactive first, engine second.** The examples' lineage, row counts and blast radius are
   precomputed by the same Python engine at build time, so the canvas works before anything heavy
   arrives. Python loads next with the whole connection to itself, and DuckDB after it. On a
