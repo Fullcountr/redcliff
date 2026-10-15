@@ -16,9 +16,9 @@ PyPI trusted publishing lets the workflow publish without a stored token.
 
 ## Each release
 
-1. Set the version in `core/src/redcliff/__init__.py` (`__version__ = "0.3.0"`) and in
-   `vscode/package.json` (`"version": "0.3.0"`, with a line in `vscode/CHANGELOG.md`), and commit them.
-2. Tag and push: `git tag v0.3.0 && git push origin v0.3.0`.
+1. Set the version in `core/src/redcliff/__init__.py` (`__version__ = "0.4.0"`) and in
+   `vscode/package.json` (`"version": "0.4.0"`, with a line in `vscode/CHANGELOG.md`), and commit them.
+2. Tag and push: `git tag v0.4.0 && git push origin v0.4.0`.
 
 The workflow checks that the tag matches the version, runs lint and the tests, builds the wheel and
 sdist, installs the wheel in a clean environment and runs it, publishes to PyPI, then creates a
